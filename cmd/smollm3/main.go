@@ -45,7 +45,7 @@ func main() {
 	prompt := flag.String("prompt", "", "input prompt")
 	systemPrompt := flag.String("system", "", "optional system prompt for chat")
 	thinking := flag.Bool("think", true, "enable SmolLM3 extended thinking chat template")
-	maxNew := flag.Int("n", 256, "maximum new tokens")
+	maxNew := flag.Int("n", 1024, "maximum new tokens")
 	temperature := flag.Float64("temp", 1.0, "sampling temperature, 0 for greedy")
 	topP := flag.Float64("top-p", 0.9, "top-p nucleus sampling")
 	seed := flag.Int64("seed", time.Now().UnixNano(), "random seed")
