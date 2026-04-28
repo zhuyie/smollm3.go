@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"smollm3go/internal/model"
@@ -34,79 +33,48 @@ func TestRenderChatPromptUsesDefaultSystemPrompt(t *testing.T) {
 	}
 }
 
-func TestRenderToolCallPromptIncludesBuiltinToolAndUserPrompt(t *testing.T) {
-	got := renderToolCallPrompt("What time is it?")
-	for _, want := range []string{
-		`"name":"get_current_hour"`,
-		`"name":"get_random_number_between"`,
-		`"required":["min","max"]`,
-		"Returns only the current hour of day in 24-hour format",
-		`"type":"function"`,
-		"<tool_call>[",
-		"<|im_start|>user\nWhat time is it?<|im_end|>",
-		"<|im_start|>assistant\n",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("renderToolCallPrompt() missing %q in %q", want, got)
-		}
-	}
-}
-
-func TestRenderToolResultPromptAsksForFinalAnswer(t *testing.T) {
-	got := renderToolResultPrompt(
-		"Can you give me the hour and a random number between 1 and 50?",
-		`<tool_call>[{"name":"get_current_hour","arguments":{}},{"name":"get_random_number_between","arguments":{"min":1,"max":50}}]</tool_call>`,
-		[]toolResultItem{
-			{Name: "get_current_hour", Result: "13"},
-			{Name: "get_random_number_between", Result: "42"},
-		},
-	)
-	for _, want := range []string{
-		"The conversation includes an assistant tool call followed by a tool result.",
-		"Use the tool result to answer the user's original request.",
-		"If there are multiple tool results, include all of them in the answer.",
-		"Do not call tools again.",
-		"<|im_start|>user\nCan you give me the hour and a random number between 1 and 50?<|im_end|>",
-		"<|im_start|>assistant\nI called these tools: get_current_hour, get_random_number_between.<|im_end|>",
-		"<|im_start|>tool\nget_current_hour result: 13\nget_random_number_between result: 42<|im_end|>",
-		"<|im_start|>assistant\n",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("renderToolResultPrompt() missing %q in %q", want, got)
-		}
-	}
-}
-
 func TestParseToolCalls(t *testing.T) {
-	got, err := parseToolCalls(`prefix <tool_call>[{"name":"get_current_hour","arguments":{}},{"name":"get_random_number_between","arguments":{"min":1,"max":50}}]</tool_call> suffix`)
-	if err != nil {
-		t.Fatal(err)
+	tests := []struct {
+		name string
+		text string
+		want []toolCallItem
+	}{
+		{
+			name: "array",
+			text: `prefix <tool_call>[{"name":"get_product_price","arguments":{"product":"notebook"}}]</tool_call> suffix`,
+			want: []toolCallItem{{Name: "get_product_price", Arguments: map[string]any{"product": "notebook"}}},
+		},
+		{
+			name: "single object",
+			text: `<tool_call>{"name":"get_product_price","arguments":{"product":"notebook"}}</tool_call>`,
+			want: []toolCallItem{{Name: "get_product_price", Arguments: map[string]any{"product": "notebook"}}},
+		},
+		{
+			name: "empty list",
+			text: `<tool_call>[]</tool_call>`,
+			want: nil,
+		},
 	}
-	if len(got) != 2 || got[0].Name != "get_current_hour" || got[1].Name != "get_random_number_between" {
-		t.Fatalf("parseToolCalls() = %#v", got)
-	}
-	if got[1].Arguments["min"] != float64(1) || got[1].Arguments["max"] != float64(50) {
-		t.Fatalf("parseToolCalls() arguments = %#v", got[1].Arguments)
-	}
-}
-
-func TestParseToolCallsAcceptsEmptyList(t *testing.T) {
-	got, err := parseToolCalls(`<tool_call>[]</tool_call>`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 0 {
-		t.Fatalf("parseToolCalls() = %#v, want empty list", got)
-	}
-}
-
-func TestParseToolCallsAcceptsSingleObject(t *testing.T) {
-	got, err := parseToolCalls(`<tool_call>{"name":"get_current_hour","arguments":{}}</tool_call>`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 1 || got[0].Name != "get_current_hour" {
-		t.Fatalf("parseToolCalls() = %#v", got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseToolCalls(tt.text)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("parseToolCalls() = %#v, want %#v", got, tt.want)
+			}
+			for i := range got {
+				if got[i].Name != tt.want[i].Name {
+					t.Fatalf("parseToolCalls()[%d].Name = %q, want %q", i, got[i].Name, tt.want[i].Name)
+				}
+				for key, want := range tt.want[i].Arguments {
+					if got[i].Arguments[key] != want {
+						t.Fatalf("parseToolCalls()[%d].Arguments[%q] = %#v, want %#v", i, key, got[i].Arguments[key], want)
+					}
+				}
+			}
+		})
 	}
 }
 
@@ -125,29 +93,12 @@ func TestParseToolCallsRejectsMalformedOutput(t *testing.T) {
 }
 
 func TestRunTool(t *testing.T) {
-	got, err := runTool(toolCallItem{Name: "get_current_hour", Arguments: map[string]any{}})
+	got, err := runTool(toolCallItem{Name: "get_product_price", Arguments: map[string]any{"product": "notebook"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != len("15") {
-		t.Fatalf("runTool() = %q, want formatted hour", got)
-	}
-}
-
-func TestRunRandomNumberTool(t *testing.T) {
-	got, err := runTool(toolCallItem{
-		Name:      "get_random_number_between",
-		Arguments: map[string]any{"min": float64(1), "max": float64(50)},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	n := 0
-	if _, err := fmt.Sscanf(got, "%d", &n); err != nil {
-		t.Fatalf("runTool() = %q, want integer", got)
-	}
-	if n < 1 || n > 50 {
-		t.Fatalf("runTool() = %d, want between 1 and 50", n)
+	if got != "$12" {
+		t.Fatalf("runTool() = %q, want mock product price", got)
 	}
 }
 

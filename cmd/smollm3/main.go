@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math/rand"
 	"os"
 	"strings"
 	"time"
@@ -31,6 +30,8 @@ type toolResultItem struct {
 	Name   string
 	Result string
 }
+
+const builtinToolsJSON = `{"type":"function","function":{"name":"get_product_price","description":"Gets the unit price for a product in USD.","parameters":{"type":"object","properties":{"product":{"type":"string","description":"The product name to look up."}},"required":["product"]}}}`
 
 const (
 	ansiReset     = "\x1b[0m"
@@ -260,6 +261,9 @@ func renderChatPrompt(messages []chatMessage, systemPrompt string, thinking bool
 		b.WriteString("<|im_start|>")
 		b.WriteString(msg.role)
 		b.WriteByte('\n')
+		if msg.role == "assistant" && !thinking {
+			b.WriteString("<think>\n\n</think>\n")
+		}
 		b.WriteString(msg.content)
 		b.WriteString("<|im_end|>\n")
 	}
@@ -303,46 +307,42 @@ func renderUserTurn(userPrompt string, thinking bool) string {
 }
 
 func renderToolCallPrompt(userPrompt string) string {
-	systemPrompt := `You are an expert in composing functions. You are given a question and a set of possible functions.
-Based on the question, you will need to make one or more function/tool calls to achieve the purpose.
-If none of the functions can be used, point it out and refuse to answer.
-If the given question lacks the parameters required by the function, also point it out.
+	systemPrompt := `You are a helpful AI assistant named SmolLM, trained by Hugging Face.
 
-You have access to the following tools:
-<tools>[{"type":"function","function":{"name":"get_random_number_between","description":"Gets a random integer between two numeric bounds.","parameters":{"type":"object","properties":{"min":{"type":"integer","description":"The minimum numeric bound."},"max":{"type":"integer","description":"The maximum numeric bound."}},"required":["min","max"]}}},{"type":"function","function":{"name":"get_current_hour","description":"Returns only the current hour of day in 24-hour format, such as 07 or 22.","parameters":{"type":"object","properties":{},"required":[]}}}]</tools>
+### Tools
 
-The output MUST strictly adhere to the following format, and NO other text MUST be included.
-The example format is as follows. Please make sure the parameter type is correct. If no function call is needed, please make the tool calls an empty list '[]'.
-<tool_call>[
-{"name": "func_name1", "arguments": {"argument1": "value1", "argument2": "value2"}}
-]</tool_call>`
+You may call one or more functions to assist with the user query.
+You are provided with function signatures within <tools></tools> XML tags:
+
+<tools>
+` + builtinToolsJSON + `
+</tools>
+
+For each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:
+<tool_call>
+{"name": <function-name>, "arguments": <args-json-object>}
+</tool_call>`
 	return renderChatPrompt([]chatMessage{{role: "user", content: userPrompt}}, systemPrompt, false)
 }
 
 func renderToolResultPrompt(userPrompt string, _ string, results []toolResultItem) string {
 	systemPrompt := `You are a helpful AI assistant.
-The conversation includes an assistant tool call followed by a tool result.
-Use the tool result to answer the user's original request.
-If there are multiple tool results, include all of them in the answer.
+Use the tool result to answer the user's request.
+Write only the final answer in plain text.
 Do not call tools again.`
-	names := make([]string, 0, len(results))
-	for _, result := range results {
-		names = append(names, result.Name)
-	}
-	messages := []chatMessage{
-		{role: "user", content: userPrompt},
-		{role: "assistant", content: "I called these tools: " + strings.Join(names, ", ") + "."},
-	}
 	var toolOut strings.Builder
-	for _, result := range results {
-		if toolOut.Len() > 0 {
+	toolOut.WriteString("Tool results:\n")
+	for i, result := range results {
+		if i > 0 {
 			toolOut.WriteByte('\n')
 		}
 		toolOut.WriteString(result.Name)
-		toolOut.WriteString(" result: ")
+		toolOut.WriteString(" returned: ")
 		toolOut.WriteString(result.Result)
 	}
-	messages = append(messages, chatMessage{role: "tool", content: toolOut.String()})
+	toolOut.WriteString("\n\nUser request:\n")
+	toolOut.WriteString(userPrompt)
+	messages := []chatMessage{{role: "user", content: toolOut.String()}}
 	return renderChatPrompt(messages, systemPrompt, false)
 }
 
@@ -396,43 +396,38 @@ func runTools(calls []toolCallItem) ([]toolResultItem, error) {
 
 func runTool(call toolCallItem) (string, error) {
 	switch call.Name {
-	case "get_current_hour":
-		if len(call.Arguments) != 0 {
-			return "", fmt.Errorf("get_current_hour does not take arguments")
-		}
-		return time.Now().Format("15"), nil
-	case "get_random_number_between":
-		minVal, err := intArgument(call, "min")
+	case "get_product_price":
+		product, err := stringArgument(call, "product")
 		if err != nil {
 			return "", err
 		}
-		maxVal, err := intArgument(call, "max")
-		if err != nil {
-			return "", err
-		}
-		if minVal > maxVal {
-			return "", fmt.Errorf("min must be <= max")
-		}
-		return fmt.Sprint(rand.Intn(maxVal-minVal+1) + minVal), nil
+		return productPrice(product)
 	default:
 		return "", fmt.Errorf("unknown tool %q", call.Name)
 	}
 }
 
-func intArgument(call toolCallItem, name string) (int, error) {
+func productPrice(product string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(product)) {
+	case "notebook", "notebooks":
+		return "$12", nil
+	case "backpack", "backpacks":
+		return "$48.00", nil
+	case "pen", "pens":
+		return "$1.20", nil
+	default:
+		return "", fmt.Errorf("unknown product %q", product)
+	}
+}
+
+func stringArgument(call toolCallItem, name string) (string, error) {
 	value, ok := call.Arguments[name]
 	if !ok {
-		return 0, fmt.Errorf("%s missing argument %q", call.Name, name)
+		return "", fmt.Errorf("%s missing argument %q", call.Name, name)
 	}
-	switch v := value.(type) {
-	case float64:
-		if v != float64(int(v)) {
-			return 0, fmt.Errorf("%s argument %q must be an integer", call.Name, name)
-		}
-		return int(v), nil
-	case int:
-		return v, nil
-	default:
-		return 0, fmt.Errorf("%s argument %q must be an integer", call.Name, name)
+	v, ok := value.(string)
+	if !ok || strings.TrimSpace(v) == "" {
+		return "", fmt.Errorf("%s argument %q must be a non-empty string", call.Name, name)
 	}
+	return v, nil
 }
