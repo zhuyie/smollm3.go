@@ -1,7 +1,6 @@
 package model
 
 import (
-	"math"
 	"runtime"
 	"sync"
 )
@@ -16,66 +15,6 @@ var matmulInt8WorkPool sync.Pool
 type QuantizedMatrix struct {
 	Data  []int8
 	Scale []float32
-}
-
-func (t *Transformer) quantizeInt8() {
-	cfg := t.Config
-	kvDim := cfg.Dim * cfg.NKVHeads / cfg.NHeads
-	for i := range t.Weights.Layers {
-		lw := &t.Weights.Layers[i]
-		lw.QWQ = quantizeMatrixInt8(lw.WQ, cfg.Dim, cfg.Dim)
-		lw.WQ = nil
-		lw.QWK = quantizeMatrixInt8(lw.WK, cfg.Dim, kvDim)
-		lw.WK = nil
-		lw.QWV = quantizeMatrixInt8(lw.WV, cfg.Dim, kvDim)
-		lw.WV = nil
-		lw.QWO = quantizeMatrixInt8(lw.WO, cfg.Dim, cfg.Dim)
-		lw.WO = nil
-		lw.QW1 = quantizeMatrixInt8(lw.W1, cfg.Dim, cfg.HiddenDim)
-		lw.W1 = nil
-		lw.QW2 = quantizeMatrixInt8(lw.W2, cfg.HiddenDim, cfg.Dim)
-		lw.W2 = nil
-		lw.QW3 = quantizeMatrixInt8(lw.W3, cfg.Dim, cfg.HiddenDim)
-		lw.W3 = nil
-	}
-	t.Weights.QWCls = quantizeMatrixInt8(t.Weights.WCls, cfg.Dim, cfg.VocabSize)
-	if !t.Weights.SharedWeights {
-		t.Weights.WCls = nil
-	}
-}
-
-func quantizeMatrixInt8(w []float32, inputs int, rows int) *QuantizedMatrix {
-	q := &QuantizedMatrix{
-		Data:  make([]int8, inputs*rows),
-		Scale: make([]float32, rows),
-	}
-	for row := 0; row < rows; row++ {
-		src := w[row*inputs : (row+1)*inputs]
-		var maxAbs float32
-		for _, v := range src {
-			abs := float32(math.Abs(float64(v)))
-			if abs > maxAbs {
-				maxAbs = abs
-			}
-		}
-		scale := float32(1)
-		if maxAbs > 0 {
-			scale = maxAbs / 127
-		}
-		q.Scale[row] = scale
-		dst := q.Data[row*inputs : (row+1)*inputs]
-		invScale := float32(1) / scale
-		for i, v := range src {
-			quantized := int(math.Round(float64(v * invScale)))
-			if quantized > 127 {
-				quantized = 127
-			} else if quantized < -127 {
-				quantized = -127
-			}
-			dst[i] = int8(quantized)
-		}
-	}
-	return q
 }
 
 func matmulWeight(out []float32, x []float32, w []float32, q *QuantizedMatrix, n int, d int) {

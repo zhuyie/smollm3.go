@@ -89,8 +89,6 @@ type State struct {
 	HB          []float32
 	HB2         []float32
 	Q           []float32
-	K           []float32
-	V           []float32
 	Att         []float32
 	Logits      []float32
 	KeyCache    []float32
@@ -226,8 +224,6 @@ func Load(path string) (t *Transformer, err error) {
 		HB:     make([]float32, cfg.HiddenDim),
 		HB2:    make([]float32, cfg.HiddenDim),
 		Q:      make([]float32, cfg.Dim),
-		K:      make([]float32, kvDim),
-		V:      make([]float32, kvDim),
 		Att:    make([]float32, cfg.NHeads*cfg.SeqLen),
 		Logits: make([]float32, cfg.VocabSize),
 		// KV cache layout: [layer][position][kvDim]. It is append-only along the
