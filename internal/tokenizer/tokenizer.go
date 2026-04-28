@@ -237,6 +237,11 @@ func (t *Tokenizer) encodePiece(bytes []byte) []int {
 	return tokens
 }
 
+// nextPiece applies the tokenizer's pre-tokenization step before BPE merging.
+// It groups text into GPT-2-style pieces such as contractions, words with an
+// optional leading symbol or space, short digit groups, symbol runs, and
+// whitespace. Each piece is then expanded to reversible byte tokens and merged
+// with the BPE rank table in encodePiece.
 func (t *Tokenizer) nextPiece(text string, pos int) (int, int) {
 	if end := matchContraction(text, pos); end > pos {
 		return pos, end
