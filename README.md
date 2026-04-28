@@ -1,10 +1,8 @@
 # smollm3.go
 
-Minimal Go implementation for local inference with
-[HuggingFaceTB/SmolLM3-3B](https://huggingface.co/HuggingFaceTB/SmolLM3-3B).
+A small, readable Go runtime for [SmolLM3-3B](https://huggingface.co/HuggingFaceTB/SmolLM3-3B) local inference, with tokenizer, int8 weight-only quantization, KV cache, and ARM64 SIMD.
 
-This is a small, readable runtime inspired by [llama2.c](https://github.com/karpathy/llama2.c) and adapted from the
-[smollm2.go](https://github.com/zhuyie/smollm3.go) implementation.
+Inspired by [llama2.c](https://github.com/karpathy/llama2.c) and adapted from the [smollm2.go](https://github.com/zhuyie/smollm3.go) implementation.
 
 ## Layout
 
@@ -55,6 +53,21 @@ To convert the FP32 checkpoint to weight-only int8:
 mkdir -p bin
 go build -o bin/smollm3 ./cmd/smollm3
 ```
+
+## Benchmark
+
+Reference results on an Apple M2 Max, using:
+
+```sh
+go test ./internal/model -bench='Benchmark(Prefill|Decode)' -benchtime=1x -run '^$'
+```
+
+| Benchmark | FP32 | Int8 |
+| --- | ---: | ---: |
+| Prefill 128 tokens | 27.94 tok/s | 28.40 tok/s |
+| Prefill 512 tokens | 23.62 tok/s | 25.24 tok/s |
+| Decode at 128-token context | 6.85 tok/s | 15.42 tok/s |
+| Decode at 512-token context | 6.45 tok/s | 13.43 tok/s |
 
 ## Run
 
