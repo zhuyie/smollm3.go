@@ -1,3 +1,5 @@
+//go:build !arm64
+
 package model
 
 func dotF32(a []float32, b []float32) float32 {

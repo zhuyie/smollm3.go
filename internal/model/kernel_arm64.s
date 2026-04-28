@@ -1,0 +1,184 @@
+//go:build arm64
+
+#include "textflag.h"
+
+// func dotF32ARM64(a, b []float32) float32
+// Based on the same ABI shape and reduction order used in github.com/tphakala/simd.
+TEXT ·dotF32ARM64(SB), NOSPLIT, $0-52
+	MOVD	a_base+0(FP), R0
+	MOVD	a_len+8(FP), R2
+	MOVD	b_len+32(FP), R3
+	CMP	R3, R2
+	CSEL	LT, R2, R3, R2 // R2 = min(len(a), len(b))
+	MOVD	b_base+24(FP), R1
+
+	VEOR	V0.B16, V0.B16, V0.B16
+	VEOR	V1.B16, V1.B16, V1.B16
+
+	LSR	$3, R2, R3
+	CBZ	R3, dot_rem4
+
+dot_loop8:
+	VLD1.P	16(R0), [V2.S4]
+	VLD1.P	16(R0), [V3.S4]
+	VLD1.P	16(R1), [V4.S4]
+	VLD1.P	16(R1), [V5.S4]
+	WORD	$0x4E24CC40 // FMLA V0.4S, V2.4S, V4.4S
+	WORD	$0x4E25CC61 // FMLA V1.4S, V3.4S, V5.4S
+	SUB	$1, R3
+	CBNZ	R3, dot_loop8
+
+	WORD	$0x4E21D400 // FADD V0.4S, V0.4S, V1.4S
+
+dot_rem4:
+	AND	$7, R2, R3
+	LSR	$2, R3, R4
+	CBZ	R4, dot_rem1
+
+	VLD1.P	16(R0), [V2.S4]
+	VLD1.P	16(R1), [V4.S4]
+	WORD	$0x4E24CC40 // FMLA V0.4S, V2.4S, V4.4S
+
+dot_rem1:
+	AND	$3, R3, R4
+	CBZ	R4, dot_reduce
+
+	WORD	$0x6E20D400 // FADDP V0.4S, V0.4S, V0.4S
+	WORD	$0x7E30D800 // FADDP S0, V0.2S
+
+dot_scalar:
+	FMOVS	(R0), F2
+	FMOVS	(R1), F4
+	FMADDS	F4, F0, F2, F0 // F0 = F2*F4 + F0
+	ADD	$4, R0
+	ADD	$4, R1
+	SUB	$1, R4
+	CBNZ	R4, dot_scalar
+
+	FMOVS	F0, ret+48(FP)
+	RET
+
+dot_reduce:
+	WORD	$0x6E20D400 // FADDP V0.4S, V0.4S, V0.4S
+	WORD	$0x7E30D800 // FADDP S0, V0.2S
+	FMOVS	F0, ret+48(FP)
+	RET
+
+// func dotF32Batch4ARM64(x0, x1, x2, x3, w []float32) (float32, float32, float32, float32)
+TEXT ·dotF32Batch4ARM64(SB), NOSPLIT, $0-136
+	MOVD	x0_base+0(FP), R0
+	MOVD	x0_len+8(FP), R2
+	MOVD	x1_base+24(FP), R1
+	MOVD	x2_base+48(FP), R4
+	MOVD	x3_base+72(FP), R5
+	MOVD	w_base+96(FP), R6
+
+	VEOR	V0.B16, V0.B16, V0.B16
+	VEOR	V1.B16, V1.B16, V1.B16
+	VEOR	V2.B16, V2.B16, V2.B16
+	VEOR	V3.B16, V3.B16, V3.B16
+	VEOR	V14.B16, V14.B16, V14.B16
+	VEOR	V15.B16, V15.B16, V15.B16
+	VEOR	V16.B16, V16.B16, V16.B16
+	VEOR	V17.B16, V17.B16, V17.B16
+
+	LSR	$3, R2, R3
+	CBZ	R3, dot_batch4_rem4
+
+dot_batch4_loop8:
+	VLD1.P	16(R6), [V4.S4]
+	VLD1.P	16(R0), [V5.S4]
+	VLD1.P	16(R1), [V6.S4]
+	VLD1.P	16(R4), [V7.S4]
+	VLD1.P	16(R5), [V8.S4]
+	WORD	$0x4E24CCA0 // FMLA V0.4S, V5.4S, V4.4S
+	WORD	$0x4E24CCC1 // FMLA V1.4S, V6.4S, V4.4S
+	WORD	$0x4E24CCE2 // FMLA V2.4S, V7.4S, V4.4S
+	WORD	$0x4E24CD03 // FMLA V3.4S, V8.4S, V4.4S
+
+	VLD1.P	16(R6), [V9.S4]
+	VLD1.P	16(R0), [V10.S4]
+	VLD1.P	16(R1), [V11.S4]
+	VLD1.P	16(R4), [V12.S4]
+	VLD1.P	16(R5), [V13.S4]
+	WORD	$0x4E29CD4E // FMLA V14.4S, V10.4S, V9.4S
+	WORD	$0x4E29CD6F // FMLA V15.4S, V11.4S, V9.4S
+	WORD	$0x4E29CD90 // FMLA V16.4S, V12.4S, V9.4S
+	WORD	$0x4E29CDB1 // FMLA V17.4S, V13.4S, V9.4S
+
+	SUB	$1, R3
+	CBNZ	R3, dot_batch4_loop8
+
+dot_batch4_rem4:
+	AND	$7, R2, R3
+	LSR	$2, R3, R3
+	CBZ	R3, dot_batch4_reduce
+
+	VLD1.P	16(R6), [V4.S4]
+	VLD1.P	16(R0), [V5.S4]
+	VLD1.P	16(R1), [V6.S4]
+	VLD1.P	16(R4), [V7.S4]
+	VLD1.P	16(R5), [V8.S4]
+	WORD	$0x4E24CCA0 // FMLA V0.4S, V5.4S, V4.4S
+	WORD	$0x4E24CCC1 // FMLA V1.4S, V6.4S, V4.4S
+	WORD	$0x4E24CCE2 // FMLA V2.4S, V7.4S, V4.4S
+	WORD	$0x4E24CD03 // FMLA V3.4S, V8.4S, V4.4S
+
+dot_batch4_reduce:
+	WORD	$0x4E2ED400 // FADD V0.4S, V0.4S, V14.4S
+	WORD	$0x4E2FD421 // FADD V1.4S, V1.4S, V15.4S
+	WORD	$0x4E30D442 // FADD V2.4S, V2.4S, V16.4S
+	WORD	$0x4E31D463 // FADD V3.4S, V3.4S, V17.4S
+	WORD	$0x6E20D400 // FADDP V0.4S, V0.4S, V0.4S
+	WORD	$0x7E30D800 // FADDP S0, V0.2S
+	WORD	$0x6E21D421 // FADDP V1.4S, V1.4S, V1.4S
+	WORD	$0x7E30D821 // FADDP S1, V1.2S
+	WORD	$0x6E22D442 // FADDP V2.4S, V2.4S, V2.4S
+	WORD	$0x7E30D842 // FADDP S2, V2.2S
+	WORD	$0x6E23D463 // FADDP V3.4S, V3.4S, V3.4S
+	WORD	$0x7E30D863 // FADDP S3, V3.2S
+
+	FMOVS	F0, ret+120(FP)
+	FMOVS	F1, ret1+124(FP)
+	FMOVS	F2, ret2+128(FP)
+	FMOVS	F3, ret3+132(FP)
+	RET
+
+// func addScaledF32ARM64(dst, src []float32, scale float32)
+TEXT ·addScaledF32ARM64(SB), NOSPLIT, $0-52
+	MOVD	dst_base+0(FP), R0
+	MOVD	dst_len+8(FP), R2
+	MOVD	src_base+24(FP), R1
+	FMOVS	scale+48(FP), F0
+
+	VDUP	V0.S[0], V0.S4
+
+	LSR	$3, R2, R3
+	CBZ	R3, addscaled_rem4
+
+addscaled_loop8:
+	MOVD	R0, R4
+	VLD1.P	16(R1), [V1.S4]
+	VLD1.P	16(R1), [V2.S4]
+	VLD1.P	16(R0), [V3.S4]
+	VLD1	(R0), [V4.S4]
+	WORD	$0x4E21CC03 // FMLA V3.4S, V0.4S, V1.4S
+	WORD	$0x4E22CC04 // FMLA V4.4S, V0.4S, V2.4S
+	VST1.P	[V3.S4], 16(R4)
+	VST1	[V4.S4], (R4)
+	ADD	$16, R0
+	SUB	$1, R3
+	CBNZ	R3, addscaled_loop8
+
+addscaled_rem4:
+	AND	$7, R2, R3
+	LSR	$2, R3, R3
+	CBZ	R3, addscaled_done
+
+	VLD1.P	16(R1), [V1.S4]
+	VLD1	(R0), [V3.S4]
+	WORD	$0x4E21CC03 // FMLA V3.4S, V0.4S, V1.4S
+	VST1.P	[V3.S4], 16(R0)
+
+addscaled_done:
+	RET
