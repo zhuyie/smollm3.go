@@ -144,6 +144,58 @@ dot_batch4_reduce:
 	FMOVS	F3, ret3+132(FP)
 	RET
 
+// func dotF32Int8ARM64(x []float32, w []int8) float32
+// Computes sum(x[i] * float32(w[i])). The Go wrapper only calls this for
+// lengths that are multiples of 16.
+TEXT ·dotF32Int8ARM64(SB), NOSPLIT, $0-52
+	MOVD	x_base+0(FP), R0
+	MOVD	x_len+8(FP), R2
+	MOVD	w_len+32(FP), R3
+	CMP	R3, R2
+	CSEL	LT, R2, R3, R2 // R2 = min(len(x), len(w))
+	MOVD	w_base+24(FP), R1
+
+	VEOR	V0.B16, V0.B16, V0.B16
+	VEOR	V1.B16, V1.B16, V1.B16
+	VEOR	V2.B16, V2.B16, V2.B16
+	VEOR	V3.B16, V3.B16, V3.B16
+
+	LSR	$4, R2, R3
+
+dot_f32_i8_loop16:
+	VLD1.P	16(R1), [V4.B16]
+	VLD1.P	16(R0), [V11.S4]
+	VLD1.P	16(R0), [V12.S4]
+	VLD1.P	16(R0), [V13.S4]
+	VLD1.P	16(R0), [V14.S4]
+
+	WORD	$0x0F08A485 // SSHLL  V5.8H, V4.8B, #0
+	WORD	$0x4F08A486 // SSHLL2 V6.8H, V4.16B, #0
+	WORD	$0x0F10A4A7 // SSHLL  V7.4S, V5.4H, #0
+	WORD	$0x4F10A4A8 // SSHLL2 V8.4S, V5.8H, #0
+	WORD	$0x0F10A4C9 // SSHLL  V9.4S, V6.4H, #0
+	WORD	$0x4F10A4CA // SSHLL2 V10.4S, V6.8H, #0
+	WORD	$0x4E21D8E7 // SCVTF V7.4S, V7.4S
+	WORD	$0x4E21D908 // SCVTF V8.4S, V8.4S
+	WORD	$0x4E21D929 // SCVTF V9.4S, V9.4S
+	WORD	$0x4E21D94A // SCVTF V10.4S, V10.4S
+	WORD	$0x4E27CD60 // FMLA V0.4S, V11.4S, V7.4S
+	WORD	$0x4E28CD81 // FMLA V1.4S, V12.4S, V8.4S
+	WORD	$0x4E29CDA2 // FMLA V2.4S, V13.4S, V9.4S
+	WORD	$0x4E2ACDC3 // FMLA V3.4S, V14.4S, V10.4S
+
+	SUB	$1, R3
+	CBNZ	R3, dot_f32_i8_loop16
+
+	WORD	$0x4E21D400 // FADD V0.4S, V0.4S, V1.4S
+	WORD	$0x4E23D442 // FADD V2.4S, V2.4S, V3.4S
+	WORD	$0x4E22D400 // FADD V0.4S, V0.4S, V2.4S
+	WORD	$0x6E20D400 // FADDP V0.4S, V0.4S, V0.4S
+	WORD	$0x7E30D800 // FADDP S0, V0.2S
+
+	FMOVS	F0, ret+48(FP)
+	RET
+
 // func addScaledF32ARM64(dst, src []float32, scale float32)
 TEXT ·addScaledF32ARM64(SB), NOSPLIT, $0-52
 	MOVD	dst_base+0(FP), R0

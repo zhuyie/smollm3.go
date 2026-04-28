@@ -7,6 +7,7 @@ const simdMinN = 64
 
 func dotF32ARM64(a []float32, b []float32) float32
 func dotF32Batch4ARM64(x0 []float32, x1 []float32, x2 []float32, x3 []float32, w []float32) (float32, float32, float32, float32)
+func dotF32Int8ARM64(x []float32, w []int8) float32
 func addScaledF32ARM64(dst []float32, src []float32, scale float32)
 
 func dotF32(a []float32, b []float32) float32 {
@@ -23,6 +24,14 @@ func dotF32Batch4(x0 []float32, x1 []float32, x2 []float32, x3 []float32, w []fl
 		return dotF32Batch4ARM64(x0[:n], x1[:n], x2[:n], x3[:n], w[:n])
 	}
 	return dotF32Batch4Scalar(x0[:n], x1[:n], x2[:n], x3[:n], w[:n])
+}
+
+func dotF32Int8(x []float32, w []int8) float32 {
+	n := min(len(x), len(w))
+	if n >= simdMinN && n&15 == 0 {
+		return dotF32Int8ARM64(x[:n], w[:n])
+	}
+	return dotF32Int8Scalar(x[:n], w[:n])
 }
 
 func matmulF32(out []float32, x []float32, w []float32, n int, d int) {

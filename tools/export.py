@@ -11,9 +11,10 @@ from transformers import AutoModelForCausalLM
 
 
 CHECKPOINT_MAGIC = 0x334C4D53  # "SML3" in little-endian bytes
-CHECKPOINT_VERSION_V1 = 1
+CHECKPOINT_VERSION = 1
 CHECKPOINT_HEADER_SIZE = 256
 MAX_ROPE_HEADER_LAYERS = 48
+WEIGHT_TYPE_FP32 = 0
 
 
 def serialize_fp32(file, tensor):
@@ -91,7 +92,7 @@ def export_hf(model_name, output_path):
         header = struct.pack(
             "<I" + "i" * 12 + "ff",
             CHECKPOINT_MAGIC,
-            CHECKPOINT_VERSION_V1,
+            CHECKPOINT_VERSION,
             dim,
             hidden_dim,
             n_layers,
@@ -107,6 +108,7 @@ def export_hf(model_name, output_path):
             rms_norm_eps,
         )
         header += struct.pack("<" + "i" * MAX_ROPE_HEADER_LAYERS, *(rope_layers + [0] * (MAX_ROPE_HEADER_LAYERS - n_layers)))
+        header += struct.pack("<i", WEIGHT_TYPE_FP32)
         out.write(header)
         out.write(b"\0" * (CHECKPOINT_HEADER_SIZE - len(header)))
 

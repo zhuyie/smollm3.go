@@ -26,13 +26,15 @@ The first 256 bytes are the fixed checkpoint header.
 | `rope_theta` | `float32` | RoPE base frequency |
 | `rms_norm_eps` | `float32` | RMSNorm epsilon |
 | `rope_layers` | `int32[48]` | first `n_layers` entries; nonzero means apply RoPE |
+| `weight_type` | `int32` | `0` means FP32, `1` means int8 projection weights |
 
 The SmolLM3-3B instruct checkpoint uses 36 layers and a 3:1 RoPE/NoPE pattern:
 `1,1,1,0` repeated.
 
 ## Weights
 
-All tensors are written as contiguous float32 values in row-major order.
+When `weight_type == 0`, all tensors are written as contiguous float32 values
+in row-major order.
 
 1. `token_embedding_table`: `(vocab_size, dim)`
 2. For each layer:
@@ -47,6 +49,14 @@ All tensors are written as contiguous float32 values in row-major order.
    - `w3`: `(hidden_dim, dim)`
 3. `rms_final_weight`: `(dim,)`
 4. If `shared_classifier == 0`, `wcls`: `(vocab_size, dim)`
+
+When `weight_type == 1`, token embeddings and RMSNorm weights remain float32,
+while projection matrices are stored as per-row symmetric int8. Each quantized
+matrix is written as `int8[rows * inputs]` followed by `float32[rows]` scales.
+The dequantized value is `float32(data[row, col]) * scale[row]`.
+
+For `weight_type == 1`, `wcls` is always stored as a quantized matrix, even
+when the classifier shares the token embedding table.
 
 ## TOK3 Tokenizer
 

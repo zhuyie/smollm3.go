@@ -148,6 +148,86 @@ func TestMatmul(t *testing.T) {
 	}
 }
 
+func TestDotF32Int8(t *testing.T) {
+	x := []float32{1.5, -2, 0.25, 4, -3, 2.5, 1, -0.5, 0.75, -1.25, 3, -4, 2, 1.25, -0.75, 0.5}
+	w := []int8{3, -4, 5, 6, -7, 8, 9, -10, 11, -12, 13, -14, 15, -16, 17, -18}
+	got := dotF32Int8(x, w)
+	want := dotF32Int8Scalar(x, w)
+	if math.Abs(float64(got-want)) > 1e-5 {
+		t.Fatalf("dotF32Int8 = %f, want %f", got, want)
+	}
+}
+
+func TestMatmulInt8MatchesFloatMatmul(t *testing.T) {
+	n := 16
+	d := 8
+	x := fillTestWeights(n)
+	w := fillTestWeights(n * d)
+	q := quantizeMatrixInt8(w, n, d)
+	got := make([]float32, d)
+	want := make([]float32, d)
+
+	matmulInt8(got, x, q, n, d)
+	matmul(want, x, w, n, d)
+
+	for i := range want {
+		if math.Abs(float64(got[i]-want[i])) > 0.001 {
+			t.Fatalf("out[%d] = %f, want near %f", i, got[i], want[i])
+		}
+	}
+}
+
+func TestForwardInt8MatchesFloat(t *testing.T) {
+	cfg := Config{
+		Dim:        8,
+		HiddenDim:  16,
+		NLayers:    2,
+		NHeads:     2,
+		NKVHeads:   1,
+		VocabSize:  17,
+		SeqLen:     16,
+		RopeTheta:  10000,
+		RMSNormEps: 1e-6,
+	}
+	floatModel := newTestTransformer(cfg)
+	quantModel := newTestTransformer(cfg)
+	quantModel.quantizeInt8()
+
+	floatLogits := floatModel.Forward(3, 0)
+	quantLogits := quantModel.Forward(3, 0)
+	for i := range floatLogits {
+		if math.Abs(float64(quantLogits[i]-floatLogits[i])) > 0.05 {
+			t.Fatalf("logit[%d] = %f, want near %f", i, quantLogits[i], floatLogits[i])
+		}
+	}
+}
+
+func TestPrefillInt8MatchesFloat(t *testing.T) {
+	cfg := Config{
+		Dim:        8,
+		HiddenDim:  16,
+		NLayers:    2,
+		NHeads:     2,
+		NKVHeads:   1,
+		VocabSize:  17,
+		SeqLen:     16,
+		RopeTheta:  10000,
+		RMSNormEps: 1e-6,
+	}
+	floatModel := newTestTransformer(cfg)
+	quantModel := newTestTransformer(cfg)
+	quantModel.quantizeInt8()
+	tokens := []int{1, 5, 9, 3}
+
+	floatLogits := floatModel.Prefill(tokens, 0)
+	quantLogits := quantModel.Prefill(tokens, 0)
+	for i := range floatLogits {
+		if math.Abs(float64(quantLogits[i]-floatLogits[i])) > 0.05 {
+			t.Fatalf("logit[%d] = %f, want near %f", i, quantLogits[i], floatLogits[i])
+		}
+	}
+}
+
 func TestPrefillMatchesForwardLoop(t *testing.T) {
 	cfg := Config{
 		Dim:        8,
@@ -276,9 +356,8 @@ func fillTestWeights(n int) []float32 {
 
 var benchmarkLogits []float32
 
-func loadBenchmarkTransformer(b *testing.B) *Transformer {
+func loadBenchmarkTransformerPath(b *testing.B, path string) *Transformer {
 	b.Helper()
-	path := filepath.Join("..", "..", "models", "smollm3-3b-f32.bin")
 	if _, err := os.Stat(path); err != nil {
 		b.Skipf("model checkpoint not found: %s", path)
 	}
@@ -287,6 +366,19 @@ func loadBenchmarkTransformer(b *testing.B) *Transformer {
 		b.Fatal(err)
 	}
 	return t
+}
+
+func benchmarkModelPaths() []struct {
+	name string
+	path string
+} {
+	return []struct {
+		name string
+		path string
+	}{
+		{name: "fp32", path: filepath.Join("..", "..", "models", "smollm3-3b-f32.bin")},
+		{name: "int8", path: filepath.Join("..", "..", "models", "smollm3-3b-int8.bin")},
+	}
 }
 
 func benchmarkTokens(vocabSize int, count int) []int {
@@ -299,21 +391,25 @@ func benchmarkTokens(vocabSize int, count int) []int {
 
 // BenchmarkPrefill measures batched prompt ingestion from position 0.
 func BenchmarkPrefill(b *testing.B) {
-	for _, promptLen := range []int{128, 512} {
-		b.Run(strconv.Itoa(promptLen), func(b *testing.B) {
-			t := loadBenchmarkTransformer(b)
-			if promptLen > t.Config.SeqLen {
-				b.Skipf("prompt length %d exceeds sequence length %d", promptLen, t.Config.SeqLen)
-			}
-			tokens := benchmarkTokens(t.Config.VocabSize, promptLen)
-			benchmarkLogits = t.Prefill(tokens, 0)
+	for _, model := range benchmarkModelPaths() {
+		b.Run(model.name, func(b *testing.B) {
+			for _, promptLen := range []int{128, 512} {
+				b.Run(strconv.Itoa(promptLen), func(b *testing.B) {
+					t := loadBenchmarkTransformerPath(b, model.path)
+					if promptLen > t.Config.SeqLen {
+						b.Skipf("prompt length %d exceeds sequence length %d", promptLen, t.Config.SeqLen)
+					}
+					tokens := benchmarkTokens(t.Config.VocabSize, promptLen)
+					benchmarkLogits = t.Prefill(tokens, 0)
 
-			b.ReportAllocs()
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				benchmarkLogits = t.Prefill(tokens, 0)
+					b.ReportAllocs()
+					b.ResetTimer()
+					for i := 0; i < b.N; i++ {
+						benchmarkLogits = t.Prefill(tokens, 0)
+					}
+					b.ReportMetric(float64(b.N*promptLen)*1e9/float64(b.Elapsed().Nanoseconds()), "tok/s")
+				})
 			}
-			b.ReportMetric(float64(b.N*promptLen)*1e9/float64(b.Elapsed().Nanoseconds()), "tok/s")
 		})
 	}
 }
@@ -322,22 +418,26 @@ func BenchmarkPrefill(b *testing.B) {
 // context has already populated the KV cache. Setup prefill is intentionally
 // outside the timed region.
 func BenchmarkDecode(b *testing.B) {
-	for _, contextLen := range []int{128, 512} {
-		b.Run(strconv.Itoa(contextLen), func(b *testing.B) {
-			t := loadBenchmarkTransformer(b)
-			if contextLen >= t.Config.SeqLen {
-				b.Skipf("context length %d leaves no decode position in sequence length %d", contextLen, t.Config.SeqLen)
-			}
-			tokens := benchmarkTokens(t.Config.VocabSize, contextLen+1)
-			benchmarkLogits = t.Prefill(tokens[:contextLen], 0)
-			decodeToken := tokens[contextLen]
+	for _, model := range benchmarkModelPaths() {
+		b.Run(model.name, func(b *testing.B) {
+			for _, contextLen := range []int{128, 512} {
+				b.Run(strconv.Itoa(contextLen), func(b *testing.B) {
+					t := loadBenchmarkTransformerPath(b, model.path)
+					if contextLen >= t.Config.SeqLen {
+						b.Skipf("context length %d leaves no decode position in sequence length %d", contextLen, t.Config.SeqLen)
+					}
+					tokens := benchmarkTokens(t.Config.VocabSize, contextLen+1)
+					benchmarkLogits = t.Prefill(tokens[:contextLen], 0)
+					decodeToken := tokens[contextLen]
 
-			b.ReportAllocs()
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				benchmarkLogits = t.Forward(decodeToken, contextLen)
+					b.ReportAllocs()
+					b.ResetTimer()
+					for i := 0; i < b.N; i++ {
+						benchmarkLogits = t.Forward(decodeToken, contextLen)
+					}
+					b.ReportMetric(float64(b.N)*1e9/float64(b.Elapsed().Nanoseconds()), "tok/s")
+				})
 			}
-			b.ReportMetric(float64(b.N)*1e9/float64(b.Elapsed().Nanoseconds()), "tok/s")
 		})
 	}
 }

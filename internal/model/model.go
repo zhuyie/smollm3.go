@@ -10,9 +10,11 @@ import (
 
 const (
 	checkpointMagic               uint32 = 0x334c4d53 // SML3
-	checkpointVersionV1                  = int32(1)
+	checkpointVersion                    = int32(1)
 	checkpointHeaderSize                 = int64(256)
 	checkpointMaxRopeHeaderLayers        = 48
+	weightTypeFP32                       = int32(0)
+	weightTypeInt8                       = int32(1)
 )
 
 type Config struct {
@@ -59,6 +61,14 @@ type LayerWeights struct {
 	W1 []float32
 	W2 []float32
 	W3 []float32
+
+	QWQ *QuantizedMatrix
+	QWK *QuantizedMatrix
+	QWV *QuantizedMatrix
+	QWO *QuantizedMatrix
+	QW1 *QuantizedMatrix
+	QW2 *QuantizedMatrix
+	QW3 *QuantizedMatrix
 }
 
 // Weights owns all model parameters.
@@ -67,6 +77,7 @@ type Weights struct {
 	Layers              []LayerWeights
 	RMSFinalWeight      []float32
 	WCls                []float32
+	QWCls               *QuantizedMatrix
 	SharedWeights       bool
 }
 
@@ -116,7 +127,7 @@ func Load(path string) (*Transformer, error) {
 	if err := binary.Read(file, binary.LittleEndian, &version); err != nil {
 		return nil, err
 	}
-	if magic != checkpointMagic || version != checkpointVersionV1 {
+	if magic != checkpointMagic || version != checkpointVersion {
 		return nil, fmt.Errorf("bad checkpoint header: magic=%#x version=%d", magic, version)
 	}
 
@@ -139,6 +150,13 @@ func Load(path string) (*Transformer, error) {
 		if err := binary.Read(file, binary.LittleEndian, &ropeLayerFields[i]); err != nil {
 			return nil, err
 		}
+	}
+	var weightType int32
+	if err := binary.Read(file, binary.LittleEndian, &weightType); err != nil {
+		return nil, err
+	}
+	if weightType != weightTypeFP32 && weightType != weightTypeInt8 {
+		return nil, fmt.Errorf("unsupported checkpoint weight type %d", weightType)
 	}
 
 	cfg := Config{
@@ -177,9 +195,18 @@ func Load(path string) (*Transformer, error) {
 	weights := Weights{SharedWeights: sharedWeights}
 	weights.TokenEmbeddingTable = readFloat32s(file, cfg.VocabSize*cfg.Dim)
 	weights.Layers = make([]LayerWeights, cfg.NLayers)
-	readFP32LayerWeights(file, cfg, kvDim, weights.Layers)
+	if weightType == weightTypeInt8 {
+		readInt8LayerWeights(file, cfg, kvDim, weights.Layers)
+	} else {
+		readFP32LayerWeights(file, cfg, kvDim, weights.Layers)
+	}
 	weights.RMSFinalWeight = readFloat32s(file, cfg.Dim)
-	if sharedWeights {
+	if weightType == weightTypeInt8 {
+		weights.QWCls = readQuantizedMatrix(file, cfg.Dim, cfg.VocabSize)
+		if sharedWeights {
+			weights.WCls = weights.TokenEmbeddingTable
+		}
+	} else if sharedWeights {
 		weights.WCls = weights.TokenEmbeddingTable
 	} else {
 		weights.WCls = readFloat32s(file, cfg.VocabSize*cfg.Dim)
@@ -239,6 +266,21 @@ func readFloat32s(r io.Reader, count int) []float32 {
 	return data
 }
 
+func readInt8s(r io.Reader, count int) []int8 {
+	data := make([]int8, count)
+	if err := binary.Read(r, binary.LittleEndian, data); err != nil {
+		panic(err)
+	}
+	return data
+}
+
+func readQuantizedMatrix(r io.Reader, inputs int, rows int) *QuantizedMatrix {
+	return &QuantizedMatrix{
+		Data:  readInt8s(r, inputs*rows),
+		Scale: readFloat32s(r, rows),
+	}
+}
+
 func readFP32LayerWeights(r io.Reader, cfg Config, kvDim int, layers []LayerWeights) {
 	for i := range layers {
 		lw := &layers[i]
@@ -251,6 +293,21 @@ func readFP32LayerWeights(r io.Reader, cfg Config, kvDim int, layers []LayerWeig
 		lw.W1 = readFloat32s(r, cfg.Dim*cfg.HiddenDim)
 		lw.W2 = readFloat32s(r, cfg.HiddenDim*cfg.Dim)
 		lw.W3 = readFloat32s(r, cfg.Dim*cfg.HiddenDim)
+	}
+}
+
+func readInt8LayerWeights(r io.Reader, cfg Config, kvDim int, layers []LayerWeights) {
+	for i := range layers {
+		lw := &layers[i]
+		lw.RMSAttWeight = readFloat32s(r, cfg.Dim)
+		lw.QWQ = readQuantizedMatrix(r, cfg.Dim, cfg.Dim)
+		lw.QWK = readQuantizedMatrix(r, cfg.Dim, kvDim)
+		lw.QWV = readQuantizedMatrix(r, cfg.Dim, kvDim)
+		lw.QWO = readQuantizedMatrix(r, cfg.Dim, cfg.Dim)
+		lw.RMSFFNWeight = readFloat32s(r, cfg.Dim)
+		lw.QW1 = readQuantizedMatrix(r, cfg.Dim, cfg.HiddenDim)
+		lw.QW2 = readQuantizedMatrix(r, cfg.HiddenDim, cfg.Dim)
+		lw.QW3 = readQuantizedMatrix(r, cfg.Dim, cfg.HiddenDim)
 	}
 }
 
@@ -324,9 +381,9 @@ func (t *Transformer) Forward(token int, pos int) []float32 {
 
 		// Query is transient for the current token; K/V persist in the cache so
 		// future positions can attend back to them.
-		matmul(s.Q, s.XB, lw.WQ, dim, dim)
-		matmul(kcache, s.XB, lw.WK, dim, kvDim)
-		matmul(vcache, s.XB, lw.WV, dim, kvDim)
+		matmulWeight(s.Q, s.XB, lw.WQ, lw.QWQ, dim, dim)
+		matmulWeight(kcache, s.XB, lw.WK, lw.QWK, dim, kvDim)
+		matmulWeight(vcache, s.XB, lw.WV, lw.QWV, dim, kvDim)
 
 		// Apply RoPE only on layers that use positional rotation. SmolLM3 leaves
 		// every fourth layer as NoPE to improve long-context behavior.
@@ -375,28 +432,28 @@ func (t *Transformer) Forward(token int, pos int) []float32 {
 		}
 
 		// Attention output projection plus residual connection.
-		matmul(s.XB2, s.XB, lw.WO, dim, dim)
+		matmulWeight(s.XB2, s.XB, lw.WO, lw.QWO, dim, dim)
 		for i := 0; i < dim; i++ {
 			s.X[i] += s.XB2[i]
 		}
 
 		// SwiGLU feed-forward block: W2(silu(W1(x)) * W3(x)).
 		rmsnorm(s.XB, s.X, lw.RMSFFNWeight, cfg.RMSNormEps)
-		matmul(s.HB, s.XB, lw.W1, dim, hiddenDim)
-		matmul(s.HB2, s.XB, lw.W3, dim, hiddenDim)
+		matmulWeight(s.HB, s.XB, lw.W1, lw.QW1, dim, hiddenDim)
+		matmulWeight(s.HB2, s.XB, lw.W3, lw.QW3, dim, hiddenDim)
 		for i := 0; i < hiddenDim; i++ {
 			val := s.HB[i]
 			val *= 1.0 / (1.0 + float32(math.Exp(float64(-val))))
 			s.HB[i] = val * s.HB2[i]
 		}
-		matmul(s.XB, s.HB, lw.W2, hiddenDim, dim)
+		matmulWeight(s.XB, s.HB, lw.W2, lw.QW2, hiddenDim, dim)
 		for i := 0; i < dim; i++ {
 			s.X[i] += s.XB[i]
 		}
 	}
 
 	rmsnorm(s.X, s.X, w.RMSFinalWeight, cfg.RMSNormEps)
-	matmul(s.Logits, s.X, w.WCls, dim, cfg.VocabSize)
+	matmulWeight(s.Logits, s.X, w.WCls, w.QWCls, dim, cfg.VocabSize)
 	return s.Logits
 }
 
@@ -446,9 +503,9 @@ func (t *Transformer) Prefill(tokens []int, startPos int) []float32 {
 	for layer := 0; layer < cfg.NLayers; layer++ {
 		lw := w.Layers[layer]
 		rmsnormBatch(xb, x, lw.RMSAttWeight, batch, dim, cfg.RMSNormEps)
-		matmulBatch(qb, xb, lw.WQ, batch, dim, dim)
-		matmulBatch(kb, xb, lw.WK, batch, dim, kvDim)
-		matmulBatch(vb, xb, lw.WV, batch, dim, kvDim)
+		matmulBatchWeight(qb, xb, lw.WQ, lw.QWQ, batch, dim, dim)
+		matmulBatchWeight(kb, xb, lw.WK, lw.QWK, batch, dim, kvDim)
+		matmulBatchWeight(vb, xb, lw.WV, lw.QWV, batch, dim, kvDim)
 
 		loff := layer * cfg.SeqLen * kvDim
 		for b := 0; b < batch; b++ {
@@ -508,20 +565,20 @@ func (t *Transformer) Prefill(tokens []int, startPos int) []float32 {
 			}
 		}
 
-		matmulBatch(xb2, xb, lw.WO, batch, dim, dim)
+		matmulBatchWeight(xb2, xb, lw.WO, lw.QWO, batch, dim, dim)
 		for i := range x {
 			x[i] += xb2[i]
 		}
 
 		rmsnormBatch(xb, x, lw.RMSFFNWeight, batch, dim, cfg.RMSNormEps)
-		matmulBatch(hb, xb, lw.W1, batch, dim, hiddenDim)
-		matmulBatch(hb2, xb, lw.W3, batch, dim, hiddenDim)
+		matmulBatchWeight(hb, xb, lw.W1, lw.QW1, batch, dim, hiddenDim)
+		matmulBatchWeight(hb2, xb, lw.W3, lw.QW3, batch, dim, hiddenDim)
 		for i := range hb {
 			val := hb[i]
 			val *= 1.0 / (1.0 + float32(math.Exp(float64(-val))))
 			hb[i] = val * hb2[i]
 		}
-		matmulBatch(xb, hb, lw.W2, batch, hiddenDim, dim)
+		matmulBatchWeight(xb, hb, lw.W2, lw.QW2, batch, hiddenDim, dim)
 		for i := range x {
 			x[i] += xb[i]
 		}
@@ -530,7 +587,7 @@ func (t *Transformer) Prefill(tokens []int, startPos int) []float32 {
 	last := x[(batch-1)*dim : batch*dim]
 	copy(s.X, last)
 	rmsnorm(s.X, s.X, w.RMSFinalWeight, cfg.RMSNormEps)
-	matmul(s.Logits, s.X, w.WCls, dim, cfg.VocabSize)
+	matmulWeight(s.Logits, s.X, w.WCls, w.QWCls, dim, cfg.VocabSize)
 	return s.Logits
 }
 

@@ -28,6 +28,23 @@ func dotF32Batch4Scalar(x0 []float32, x1 []float32, x2 []float32, x3 []float32, 
 	return v0, v1, v2, v3
 }
 
+func dotF32Int8Scalar(x []float32, w []int8) float32 {
+	var v0, v1, v2, v3 float32
+	j := 0
+	n := len(x)
+	for ; j+3 < n; j += 4 {
+		v0 += x[j] * float32(w[j])
+		v1 += x[j+1] * float32(w[j+1])
+		v2 += x[j+2] * float32(w[j+2])
+		v3 += x[j+3] * float32(w[j+3])
+	}
+	val := v0 + v1 + v2 + v3
+	for ; j < n; j++ {
+		val += x[j] * float32(w[j])
+	}
+	return val
+}
+
 func matmulScalar(out []float32, x []float32, w []float32, n int, d int) {
 	out = out[:d]
 	x = x[:n]

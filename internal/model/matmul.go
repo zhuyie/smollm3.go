@@ -32,9 +32,34 @@ type matmulBatchJob struct {
 	wg    *sync.WaitGroup
 }
 
+type matmulInt8Job struct {
+	out  []float32
+	x    []float32
+	q    *QuantizedMatrix
+	n    int
+	row0 int
+	row1 int
+	wg   *sync.WaitGroup
+}
+
+type matmulBatchInt8Job struct {
+	out   []float32
+	x     []float32
+	q     *QuantizedMatrix
+	work  []float32
+	batch int
+	n     int
+	d     int
+	row0  int
+	row1  int
+	wg    *sync.WaitGroup
+}
+
 var (
 	matmulJobs          = make(chan matmulJob, matmulMaxWorkers)
 	matmulBatchJobs     = make(chan matmulBatchJob, matmulMaxWorkers)
+	matmulInt8Jobs      = make(chan matmulInt8Job, matmulMaxWorkers)
+	matmulBatchInt8Jobs = make(chan matmulBatchInt8Job, matmulMaxWorkers)
 	matmulStartOnce     sync.Once
 	matmulWaitGroupPool = sync.Pool{New: func() any { return new(sync.WaitGroup) }}
 )
@@ -144,6 +169,12 @@ func startMatmulWorkers() {
 						job.wg.Done()
 					case job := <-matmulBatchJobs:
 						matmulBatchRows(job.out, job.x, job.w, job.batch, job.n, job.d, job.row0, job.row1)
+						job.wg.Done()
+					case job := <-matmulInt8Jobs:
+						matmulInt8Rows(job.out, job.x, job.q, job.n, job.row0, job.row1)
+						job.wg.Done()
+					case job := <-matmulBatchInt8Jobs:
+						matmulBatchInt8Rows(job.out, job.x, job.q, job.work, job.batch, job.n, job.d, job.row0, job.row1)
 						job.wg.Done()
 					}
 				}

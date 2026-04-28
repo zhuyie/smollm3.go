@@ -3,10 +3,8 @@
 Minimal Go implementation for local inference with
 [HuggingFaceTB/SmolLM3-3B](https://huggingface.co/HuggingFaceTB/SmolLM3-3B).
 
-This is a small, readable FP32 runtime inspired by `llama2.c` and adapted from
-the SmolLM2 Go implementation. The current target is a minimal-correct SmolLM3
-path: float32 export, tokenizer export, GQA, the SmolLM3 RoPE/NoPE layer
-pattern, batched prompt prefill, and chat rendering.
+This is a small, readable runtime inspired by [llama2.c](https://github.com/karpathy/llama2.c) and adapted from the
+[smollm2.go](https://github.com/zhuyie/smollm3.go) implementation.
 
 ## Layout
 
@@ -43,6 +41,14 @@ mkdir -p models
   --hf HuggingFaceTB/SmolLM3-3B
 ```
 
+To convert the FP32 checkpoint to weight-only int8:
+
+```sh
+.venv/bin/python tools/quantize.py \
+  models/smollm3-3b-f32.bin \
+  models/smollm3-3b-int8.bin
+```
+
 ## Build
 
 ```sh
@@ -54,7 +60,7 @@ go build -o bin/smollm3 ./cmd/smollm3
 
 ```sh
 bin/smollm3 \
-  -model models/smollm3-3b-f32.bin \
+  -model models/smollm3-3b-int8.bin \
   -tokenizer models/smollm3-tokenizer.bin \
   -mode chat \
   -prompt "Give me a brief explanation of gravity in simple terms." \
@@ -66,7 +72,7 @@ Disable extended thinking in chat rendering:
 
 ```sh
 bin/smollm3 \
-  -model models/smollm3-3b-f32.bin \
+  -model models/smollm3-3b-int8.bin \
   -tokenizer models/smollm3-tokenizer.bin \
   -mode chat \
   -think=false \
