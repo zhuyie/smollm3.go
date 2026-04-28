@@ -9,7 +9,6 @@ import (
 	"log"
 	"math/rand"
 	"os"
-	"sort"
 	"strings"
 	"time"
 
@@ -42,7 +41,7 @@ const (
 func main() {
 	modelPath := flag.String("model", "", "SML3 model path")
 	tokenizerPath := flag.String("tokenizer", "", "TOK3 tokenizer path")
-	mode := flag.String("mode", "generate", "generate|chat|toolcall|encode|logits")
+	mode := flag.String("mode", "generate", "generate|chat|toolcall")
 	prompt := flag.String("prompt", "", "input prompt")
 	systemPrompt := flag.String("system", "", "optional system prompt for chat")
 	thinking := flag.Bool("think", true, "enable SmolLM3 extended thinking chat template")
@@ -74,17 +73,6 @@ func main() {
 		chat(transformer, tok, samp, *prompt, *systemPrompt, *thinking, *maxNew)
 	case "toolcall":
 		toolCall(transformer, tok, samp, *prompt, *maxNew)
-	case "encode":
-		ids := tok.Encode(*prompt, false, false)
-		for i, id := range ids {
-			if i > 0 {
-				fmt.Print(" ")
-			}
-			fmt.Print(id)
-		}
-		fmt.Println()
-	case "logits":
-		printTopLogits(transformer, tok, *prompt, 10)
 	default:
 		log.Fatalf("unknown mode %q", *mode)
 	}
@@ -446,26 +434,5 @@ func intArgument(call toolCallItem, name string) (int, error) {
 		return v, nil
 	default:
 		return 0, fmt.Errorf("%s argument %q must be an integer", call.Name, name)
-	}
-}
-
-func printTopLogits(t *model.Transformer, tok *tokenizer.Tokenizer, prompt string, k int) {
-	ids := tok.Encode(prompt, false, false)
-	if len(ids) == 0 {
-		log.Fatal("empty prompt")
-	}
-	end := min(len(ids), t.Config.SeqLen)
-	logits := t.Prefill(ids[:end], 0)
-	type item struct {
-		id  int
-		val float32
-	}
-	items := make([]item, len(logits))
-	for i, v := range logits {
-		items[i] = item{id: i, val: v}
-	}
-	sort.Slice(items, func(i, j int) bool { return items[i].val > items[j].val })
-	for i := 0; i < k && i < len(items); i++ {
-		fmt.Printf("%d %.6f %s\n", items[i].id, items[i].val, tok.Decode(items[i].id))
 	}
 }
