@@ -1,0 +1,20 @@
+# macOS
+.DS_Store
+
+# Go build outputs
+/bin/
+*.test
+coverage.out
+
+# Go workspace/cache files
+go.work
+go.work.sum
+
+# Python environments and caches for export scripts
+.venv/
+__pycache__/
+*.py[cod]
+
+# Generated model/tokenizer artifacts
+/models/
+
