@@ -97,7 +97,7 @@ func TestRunTool(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != "$12" {
+	if got != "12" {
 		t.Fatalf("runTool() = %q, want mock product price", got)
 	}
 }

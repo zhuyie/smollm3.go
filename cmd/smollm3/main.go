@@ -31,7 +31,7 @@ type toolResultItem struct {
 	Result string
 }
 
-const builtinToolsJSON = `{"type":"function","function":{"name":"get_product_price","description":"Gets the unit price for a product in USD.","parameters":{"type":"object","properties":{"product":{"type":"string","description":"The product name to look up."}},"required":["product"]}}}`
+const builtinToolsJSON = `{"type":"function","function":{"name":"get_product_price","description":"Gets the unit price for a product in the local currency.","parameters":{"type":"object","properties":{"product":{"type":"string","description":"The product name to look up."}},"required":["product"]}}}`
 
 const (
 	ansiReset     = "\x1b[0m"
@@ -410,11 +410,11 @@ func runTool(call toolCallItem) (string, error) {
 func productPrice(product string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(product)) {
 	case "notebook", "notebooks":
-		return "$12", nil
+		return "12", nil
 	case "backpack", "backpacks":
-		return "$48.00", nil
+		return "48.00", nil
 	case "pen", "pens":
-		return "$1.20", nil
+		return "1.20", nil
 	default:
 		return "", fmt.Errorf("unknown product %q", product)
 	}

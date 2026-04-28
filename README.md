@@ -101,6 +101,6 @@ bin/smollm3 \
   -model models/smollm3-3b-int8.bin \
   -tokenizer models/smollm3-tokenizer.bin \
   -mode toolcall \
-  -prompt "I have $40. Can I buy 3 notebooks, and how much money would be left?" \
+  -prompt "I have 40 dollars. Can I buy 3 notebooks, and how much money would be left?" \
   -temp 0
 ```
