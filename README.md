@@ -58,17 +58,30 @@ go build -o bin/smollm3 ./cmd/smollm3
 
 ## Run
 
+Generate plain continuation text:
+
+```sh
+bin/smollm3 \
+  -model models/smollm3-3b-int8.bin \
+  -tokenizer models/smollm3-tokenizer.bin \
+  -mode generate \
+  -n 128 \
+  -prompt "The galaxy empire" \
+  -temp 0
+```
+
+Run a single chat turn:
+
 ```sh
 bin/smollm3 \
   -model models/smollm3-3b-int8.bin \
   -tokenizer models/smollm3-tokenizer.bin \
   -mode chat \
   -prompt "Give me a brief explanation of gravity in simple terms." \
-  -temp 0.6 \
-  -top-p 0.95
+  -temp 0
 ```
 
-Disable extended thinking in chat rendering:
+Disable thinking:
 
 ```sh
 bin/smollm3 \
@@ -76,6 +89,7 @@ bin/smollm3 \
   -tokenizer models/smollm3-tokenizer.bin \
   -mode chat \
   -think=false \
+  -system "Answer as concisely as possible. For arithmetic, give only the equation and result." \
   -prompt "What is 2+2?" \
   -temp 0
 ```
