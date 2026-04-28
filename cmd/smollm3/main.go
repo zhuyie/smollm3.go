@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"os"
 	"strings"
 	"time"
@@ -55,6 +56,15 @@ func main() {
 	if *modelPath == "" || *tokenizerPath == "" {
 		flag.Usage()
 		os.Exit(2)
+	}
+	if *maxNew <= 0 {
+		*maxNew = 1024
+	}
+	if *temperature < 0 || math.IsNaN(*temperature) || math.IsInf(*temperature, 0) {
+		*temperature = 1.0
+	}
+	if *topP < 0 || *topP > 1 || math.IsNaN(*topP) || math.IsInf(*topP, 0) {
+		*topP = 0.9
 	}
 
 	transformer, err := model.Load(*modelPath)
