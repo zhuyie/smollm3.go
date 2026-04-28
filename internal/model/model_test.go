@@ -1,10 +1,12 @@
 package model
 
 import (
+	"encoding/binary"
 	"math"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -27,6 +29,54 @@ func TestValidateConfig(t *testing.T) {
 	invalid.NHeads = 3
 	if err := validateConfig(invalid); err == nil {
 		t.Fatal("validateConfig(invalid) returned nil")
+	}
+}
+
+func TestLoadReturnsErrorForTruncatedWeights(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "truncated.sml3")
+	header := make([]byte, checkpointHeaderSize)
+	off := 0
+	binary.LittleEndian.PutUint32(header[off:], checkpointMagic)
+	off += 4
+	for _, value := range []int32{
+		checkpointVersion,
+		4,  // dim
+		8,  // hidden_dim
+		1,  // n_layers
+		2,  // n_heads
+		1,  // n_kv_heads
+		3,  // vocab_size
+		16, // seq_len
+		1,  // shared_classifier
+		0,  // bos_id
+		1,  // eos_id
+		-1, // pad_id
+	} {
+		binary.LittleEndian.PutUint32(header[off:], uint32(value))
+		off += 4
+	}
+	binary.LittleEndian.PutUint32(header[off:], math.Float32bits(10000))
+	off += 4
+	binary.LittleEndian.PutUint32(header[off:], math.Float32bits(1e-6))
+	off += 4
+	binary.LittleEndian.PutUint32(header[off:], 1)
+	off += 4 * checkpointMaxRopeHeaderLayers
+	binary.LittleEndian.PutUint32(header[off:], uint32(weightTypeFP32))
+	if err := os.WriteFile(path, header, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("Load panicked for truncated checkpoint: %v", r)
+		}
+	}()
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load returned nil error for truncated checkpoint")
+	}
+	if !strings.Contains(err.Error(), "failed to load checkpoint weights") {
+		t.Fatalf("Load error = %q, want checkpoint load context", err)
 	}
 }
 

@@ -112,7 +112,14 @@ type Transformer struct {
 	Tables  Tables
 }
 
-func Load(path string) (*Transformer, error) {
+func Load(path string) (t *Transformer, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			t = nil
+			err = fmt.Errorf("failed to load checkpoint weights: %v", r)
+		}
+	}()
+
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
