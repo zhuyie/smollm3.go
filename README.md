@@ -4,6 +4,8 @@ A small, readable Go runtime for [SmolLM3-3B](https://huggingface.co/HuggingFace
 
 Inspired by [llama2.c](https://github.com/karpathy/llama2.c) and adapted from the [smollm2.go](https://github.com/zhuyie/smollm3.go) implementation.
 
+![smollm3.go chat demo](docs/images/smollm3-chat.png)
+
 ## Layout
 
 ```text
