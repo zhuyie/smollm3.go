@@ -1,6 +1,6 @@
 # smollm3.go
 
-A small, readable Go runtime for [SmolLM3-3B](https://huggingface.co/HuggingFaceTB/SmolLM3-3B) local inference, with tokenizer, int8 weight-only quantization, KV cache, and ARM64 SIMD.
+A small, readable Go runtime for [SmolLM3-3B](https://huggingface.co/HuggingFaceTB/SmolLM3-3B) local inference, with tokenizer, int8 weight-only quantization, KV cache, and ARM64/amd64 SIMD kernels.
 
 Inspired by [llama2.c](https://github.com/karpathy/llama2.c) and adapted from the [smollm2.go](https://github.com/zhuyie/smollm3.go) implementation.
 
@@ -58,11 +58,13 @@ go build -o bin/smollm3 ./cmd/smollm3
 
 ## Benchmark
 
-Reference results on an Apple M2 Max, using:
+Using:
 
 ```sh
 go test ./internal/model -bench='Benchmark(Prefill|Decode)' -benchtime=1x -run '^$'
 ```
+
+Reference results on an Apple M2 Max:
 
 | Benchmark | FP32 | Int8 |
 | --- | ---: | ---: |
@@ -70,6 +72,15 @@ go test ./internal/model -bench='Benchmark(Prefill|Decode)' -benchtime=1x -run '
 | Prefill 512 tokens | 23.62 tok/s | 25.24 tok/s |
 | Decode at 128-token context | 6.85 tok/s | 15.42 tok/s |
 | Decode at 512-token context | 6.45 tok/s | 13.43 tok/s |
+
+Reference results on Windows/amd64 with an AMD Ryzen 9 9950X:
+
+| Benchmark | FP32 | Int8 |
+| --- | ---: | ---: |
+| Prefill 128 tokens | 62.35 tok/s | 76.23 tok/s |
+| Prefill 512 tokens | 51.37 tok/s | 58.57 tok/s |
+| Decode at 128-token context | 3.35 tok/s | 12.13 tok/s |
+| Decode at 512-token context | 3.24 tok/s | 11.12 tok/s |
 
 ## Run
 
