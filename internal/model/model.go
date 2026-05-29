@@ -96,6 +96,10 @@ type State struct {
 	BatchDim    []float32
 	BatchKVDim  []float32
 	BatchHidden []float32
+	// Int8 and Int8Scales are reused by the int8 matmul path for dynamic
+	// activation quantization.
+	Int8       []int8
+	Int8Scales []float32
 }
 
 type Tables struct {
@@ -384,9 +388,9 @@ func (t *Transformer) Forward(token int, pos int) []float32 {
 
 		// Query is transient for the current token; K/V persist in the cache so
 		// future positions can attend back to them.
-		matmulWeight(s.Q, s.XB, lw.WQ, lw.QWQ, dim, dim)
-		matmulWeight(kcache, s.XB, lw.WK, lw.QWK, dim, kvDim)
-		matmulWeight(vcache, s.XB, lw.WV, lw.QWV, dim, kvDim)
+		matmulWeight(s, s.Q, s.XB, lw.WQ, lw.QWQ, dim, dim)
+		matmulWeight(s, kcache, s.XB, lw.WK, lw.QWK, dim, kvDim)
+		matmulWeight(s, vcache, s.XB, lw.WV, lw.QWV, dim, kvDim)
 
 		// Apply RoPE only on layers that use positional rotation. SmolLM3 leaves
 		// every fourth layer as NoPE to improve long-context behavior.
@@ -435,28 +439,28 @@ func (t *Transformer) Forward(token int, pos int) []float32 {
 		}
 
 		// Attention output projection plus residual connection.
-		matmulWeight(s.XB2, s.XB, lw.WO, lw.QWO, dim, dim)
+		matmulWeight(s, s.XB2, s.XB, lw.WO, lw.QWO, dim, dim)
 		for i := 0; i < dim; i++ {
 			s.X[i] += s.XB2[i]
 		}
 
 		// SwiGLU feed-forward block: W2(silu(W1(x)) * W3(x)).
 		rmsnorm(s.XB, s.X, lw.RMSFFNWeight, cfg.RMSNormEps)
-		matmulWeight(s.HB, s.XB, lw.W1, lw.QW1, dim, hiddenDim)
-		matmulWeight(s.HB2, s.XB, lw.W3, lw.QW3, dim, hiddenDim)
+		matmulWeight(s, s.HB, s.XB, lw.W1, lw.QW1, dim, hiddenDim)
+		matmulWeight(s, s.HB2, s.XB, lw.W3, lw.QW3, dim, hiddenDim)
 		for i := 0; i < hiddenDim; i++ {
 			val := s.HB[i]
 			val *= 1.0 / (1.0 + float32(math.Exp(float64(-val))))
 			s.HB[i] = val * s.HB2[i]
 		}
-		matmulWeight(s.XB, s.HB, lw.W2, lw.QW2, hiddenDim, dim)
+		matmulWeight(s, s.XB, s.HB, lw.W2, lw.QW2, hiddenDim, dim)
 		for i := 0; i < dim; i++ {
 			s.X[i] += s.XB[i]
 		}
 	}
 
 	rmsnorm(s.X, s.X, w.RMSFinalWeight, cfg.RMSNormEps)
-	matmulWeight(s.Logits, s.X, w.WCls, w.QWCls, dim, cfg.VocabSize)
+	matmulWeight(s, s.Logits, s.X, w.WCls, w.QWCls, dim, cfg.VocabSize)
 	return s.Logits
 }
 
@@ -506,9 +510,9 @@ func (t *Transformer) Prefill(tokens []int, startPos int) []float32 {
 	for layer := 0; layer < cfg.NLayers; layer++ {
 		lw := w.Layers[layer]
 		rmsnormBatch(xb, x, lw.RMSAttWeight, batch, dim, cfg.RMSNormEps)
-		matmulBatchWeight(qb, xb, lw.WQ, lw.QWQ, batch, dim, dim)
-		matmulBatchWeight(kb, xb, lw.WK, lw.QWK, batch, dim, kvDim)
-		matmulBatchWeight(vb, xb, lw.WV, lw.QWV, batch, dim, kvDim)
+		matmulBatchWeight(s, qb, xb, lw.WQ, lw.QWQ, batch, dim, dim)
+		matmulBatchWeight(s, kb, xb, lw.WK, lw.QWK, batch, dim, kvDim)
+		matmulBatchWeight(s, vb, xb, lw.WV, lw.QWV, batch, dim, kvDim)
 
 		loff := layer * cfg.SeqLen * kvDim
 		for b := 0; b < batch; b++ {
@@ -568,20 +572,20 @@ func (t *Transformer) Prefill(tokens []int, startPos int) []float32 {
 			}
 		}
 
-		matmulBatchWeight(xb2, xb, lw.WO, lw.QWO, batch, dim, dim)
+		matmulBatchWeight(s, xb2, xb, lw.WO, lw.QWO, batch, dim, dim)
 		for i := range x {
 			x[i] += xb2[i]
 		}
 
 		rmsnormBatch(xb, x, lw.RMSFFNWeight, batch, dim, cfg.RMSNormEps)
-		matmulBatchWeight(hb, xb, lw.W1, lw.QW1, batch, dim, hiddenDim)
-		matmulBatchWeight(hb2, xb, lw.W3, lw.QW3, batch, dim, hiddenDim)
+		matmulBatchWeight(s, hb, xb, lw.W1, lw.QW1, batch, dim, hiddenDim)
+		matmulBatchWeight(s, hb2, xb, lw.W3, lw.QW3, batch, dim, hiddenDim)
 		for i := range hb {
 			val := hb[i]
 			val *= 1.0 / (1.0 + float32(math.Exp(float64(-val))))
 			hb[i] = val * hb2[i]
 		}
-		matmulBatchWeight(xb, hb, lw.W2, lw.QW2, batch, hiddenDim, dim)
+		matmulBatchWeight(s, xb, hb, lw.W2, lw.QW2, batch, hiddenDim, dim)
 		for i := range x {
 			x[i] += xb[i]
 		}
@@ -590,7 +594,7 @@ func (t *Transformer) Prefill(tokens []int, startPos int) []float32 {
 	last := x[(batch-1)*dim : batch*dim]
 	copy(s.X, last)
 	rmsnorm(s.X, s.X, w.RMSFinalWeight, cfg.RMSNormEps)
-	matmulWeight(s.Logits, s.X, w.WCls, w.QWCls, dim, cfg.VocabSize)
+	matmulWeight(s, s.Logits, s.X, w.WCls, w.QWCls, dim, cfg.VocabSize)
 	return s.Logits
 }
 

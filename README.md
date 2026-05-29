@@ -68,10 +68,10 @@ Reference results on an Apple M2 Max:
 
 | Benchmark | FP32 | Int8 |
 | --- | ---: | ---: |
-| Prefill 128 tokens | 27.94 tok/s | 28.40 tok/s |
-| Prefill 512 tokens | 23.62 tok/s | 25.24 tok/s |
-| Decode at 128-token context | 6.85 tok/s | 15.42 tok/s |
-| Decode at 512-token context | 6.45 tok/s | 13.43 tok/s |
+| Prefill 128 tokens | 30.22 tok/s | 45.93 tok/s |
+| Prefill 512 tokens | 24.56 tok/s | 40.59 tok/s |
+| Decode at 128-token context | 6.843 tok/s | 19.12 tok/s |
+| Decode at 512-token context | 6.418 tok/s | 15.16 tok/s |
 
 Reference results on Windows/amd64 with an AMD Ryzen 9 9950X:
 
