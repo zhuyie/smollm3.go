@@ -335,25 +335,39 @@ For each function call, return a json object with function name and arguments wi
 	return renderChatPrompt([]chatMessage{{role: "user", content: userPrompt}}, systemPrompt, false)
 }
 
-func renderToolResultPrompt(userPrompt string, _ string, results []toolResultItem) string {
+func renderToolResultPrompt(userPrompt string, toolRequest string, results []toolResultItem) string {
 	systemPrompt := `You are a helpful AI assistant.
-Use the tool result to answer the user's request.
+Use the tool response to answer the user's request.
 Write only the final answer in plain text.
 Do not call tools again.`
+	messages := []chatMessage{
+		{role: "user", content: userPrompt},
+		{role: "assistant", content: strings.TrimSpace(toolRequest)},
+		{role: "user", content: renderToolResponse(results)},
+	}
+	return renderChatPrompt(messages, systemPrompt, false)
+}
+
+func renderToolResponse(results []toolResultItem) string {
 	var toolOut strings.Builder
-	toolOut.WriteString("Tool results:\n")
+	toolOut.WriteString("<tool_response>\n")
 	for i, result := range results {
 		if i > 0 {
 			toolOut.WriteByte('\n')
 		}
-		toolOut.WriteString(result.Name)
-		toolOut.WriteString(" returned: ")
-		toolOut.WriteString(result.Result)
+		data, err := json.Marshal(struct {
+			Name   string `json:"name"`
+			Result string `json:"result"`
+		}{
+			Name:   result.Name,
+			Result: result.Result,
+		})
+		if err == nil {
+			toolOut.Write(data)
+		}
 	}
-	toolOut.WriteString("\n\nUser request:\n")
-	toolOut.WriteString(userPrompt)
-	messages := []chatMessage{{role: "user", content: toolOut.String()}}
-	return renderChatPrompt(messages, systemPrompt, false)
+	toolOut.WriteString("\n</tool_response>")
+	return toolOut.String()
 }
 
 func parseToolCalls(text string) ([]toolCallItem, error) {
