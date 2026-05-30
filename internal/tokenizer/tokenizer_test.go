@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 )
 
@@ -24,6 +25,8 @@ func testTokenizer() *Tokenizer {
 		"<|im_end|>",
 		"<think>",
 		"</think>",
+		"<tool_call>",
+		"</tool_call>",
 	}
 	tok := &Tokenizer{
 		Vocab:      vocab,
@@ -79,10 +82,32 @@ func TestDecodeRoundTripsByteLevelPieces(t *testing.T) {
 
 func TestEncodeMatchesAllSpecialTokens(t *testing.T) {
 	tok := testTokenizer()
-	got := tok.Encode("<|im_start|>user<|im_end|><think></think>", false, false)
-	want := []int{10, 2, 2, 2, 2, 11, 12, 13}
+	got := tok.Encode("<|im_start|>user<|im_end|><think></think><tool_call></tool_call>", false, false)
+	want := []int{10, 2, 2, 2, 2, 11, 12, 13, 14, 15}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Encode() = %v, want %v", got, want)
+	}
+}
+
+func TestNextPieceUsesUnicodeNumberCategory(t *testing.T) {
+	tok := testTokenizer()
+	_, end := tok.nextPiece("ⅧⅨx", 0)
+	if end != len("ⅧⅨ") {
+		t.Fatalf("nextPiece() end = %d, want %d", end, len("ⅧⅨ"))
+	}
+}
+
+func TestNextPieceOnlyAbsorbsASCIIBlankBeforeSymbols(t *testing.T) {
+	tok := testTokenizer()
+
+	_, end := tok.nextPiece(" !!!", 0)
+	if end != len(" !!!") {
+		t.Fatalf("nextPiece() end for space-prefixed symbols = %d, want %d", end, len(" !!!"))
+	}
+
+	_, end = tok.nextPiece("\t!!!", 0)
+	if end != len("\t") {
+		t.Fatalf("nextPiece() end for tab-prefixed symbols = %d, want %d", end, len("\t"))
 	}
 }
 
@@ -131,6 +156,44 @@ func TestLoadRejectsOutOfRangeSpecialIDs(t *testing.T) {
 
 	if _, err := Load(path, 1); err == nil {
 		t.Fatal("Load() succeeded for out-of-range special id")
+	}
+}
+
+func TestEncodeMatchesOfficialTokenizerSamples(t *testing.T) {
+	_, filename, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("could not locate test file")
+	}
+	path := filepath.Join(filepath.Dir(filename), "..", "..", "models", "smollm3-tokenizer.bin")
+	if _, err := os.Stat(path); err != nil {
+		t.Skipf("tokenizer not found: %s", path)
+	}
+
+	tok, err := Load(path, 128256)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		text string
+		want []int
+	}{
+		{"Hello, world!", []int{9906, 11, 1917, 0}},
+		{"<|im_start|>user\nhi<|im_end|>", []int{128011, 882, 198, 6151, 128012}},
+		{"<tool_call>{\"name\":\"x\"}</tool_call>", []int{128015, 5018, 609, 3332, 87, 9388, 128016}},
+		{"<tool_response>ok</tool_response>", []int{128013, 564, 128014}},
+		{"<code>print(1)</code>", []int{128017, 1374, 7, 16, 8, 128018}},
+		{"abc1234567 def", []int{13997, 4513, 10961, 22, 711}},
+		{"ⅧⅨx", []int{71567, 100, 71567, 101, 87}},
+		{"\t!!!", []int{197, 12340}},
+		{" !!!", []int{33970}},
+		{"line  \n  next", []int{1074, 2355, 220, 1828}},
+		{"中文 mixed １２3", []int{108891, 9709, 220, 20713, 25963, 18}},
+	}
+	for _, tt := range tests {
+		got := tok.Encode(tt.text, false, false)
+		if !reflect.DeepEqual(got, tt.want) {
+			t.Fatalf("Encode(%q) = %v, want %v", tt.text, got, tt.want)
+		}
 	}
 }
 

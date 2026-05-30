@@ -27,6 +27,12 @@ def iter_merges(tokenizer):
             yield merge[0], merge[1]
 
 
+def tokenizer_json(tokenizer):
+    if not hasattr(tokenizer, "backend_tokenizer"):
+        return {}
+    return json.loads(tokenizer.backend_tokenizer.to_str())
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("output", help="output tokenizer .bin path")
@@ -34,6 +40,7 @@ def main():
     args = parser.parse_args()
 
     tokenizer = AutoTokenizer.from_pretrained(args.hf)
+    backend = tokenizer_json(tokenizer)
     vocab_by_token = tokenizer.get_vocab()
     vocab_size = len(vocab_by_token)
     vocab = [None] * vocab_size
@@ -58,6 +65,11 @@ def main():
             idx
             for token, idx in vocab_by_token.items()
             if token.startswith("<|") or token in {"<think>", "</think>"}
+        }
+        | {
+            token["id"]
+            for token in backend.get("added_tokens", [])
+            if isinstance(token.get("id"), int)
         }
         | {idx for idx in (bos_id, eos_id, pad_id, unk_id) if idx is not None and idx >= 0}
     )

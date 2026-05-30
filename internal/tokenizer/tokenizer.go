@@ -215,10 +215,18 @@ func (t *Tokenizer) matchSpecial(text string, pos int) (int, int, bool) {
 }
 
 func (t *Tokenizer) ensureSpecialIDs() {
+	seen := make(map[int]bool, len(t.SpecialIDs)+4)
 	if len(t.SpecialIDs) > 0 {
+		specialIDs := t.SpecialIDs[:0]
+		for _, id := range t.SpecialIDs {
+			if id >= 0 && id < len(t.Vocab) && !seen[id] {
+				specialIDs = append(specialIDs, id)
+				seen[id] = true
+			}
+		}
+		t.SpecialIDs = specialIDs
 		return
 	}
-	seen := make(map[int]bool)
 	for _, id := range []int{t.BOSID, t.EOSID, t.UNKID, t.PADID} {
 		if id >= 0 && id < len(t.Vocab) && !seen[id] {
 			t.SpecialIDs = append(t.SpecialIDs, id)
@@ -226,11 +234,15 @@ func (t *Tokenizer) ensureSpecialIDs() {
 		}
 	}
 	for id, piece := range t.Vocab {
-		if (strings.HasPrefix(piece, "<|") || strings.HasPrefix(piece, "<think") || strings.HasPrefix(piece, "</think")) && !seen[id] {
+		if isAddedTokenLike(piece) && !seen[id] {
 			t.SpecialIDs = append(t.SpecialIDs, id)
 			seen[id] = true
 		}
 	}
+}
+
+func isAddedTokenLike(piece string) bool {
+	return len(piece) >= 2 && strings.HasPrefix(piece, "<") && strings.HasSuffix(piece, ">")
 }
 
 func (t *Tokenizer) initByteTokenIDs() {
@@ -312,14 +324,14 @@ func (t *Tokenizer) nextPiece(text string, pos int) (int, int) {
 	if unicode.IsLetter(r) {
 		return pos, t.consumeWhile(text, pos, unicode.IsLetter)
 	}
-	if unicode.IsDigit(r) {
+	if unicode.IsNumber(r) {
 		end := pos
 		for count := 0; count < 3 && end < len(text); count++ {
 			if _, _, ok := t.matchSpecial(text, end); ok {
 				break
 			}
 			next, nextWidth := utf8.DecodeRuneInString(text[end:])
-			if !unicode.IsDigit(next) {
+			if !unicode.IsNumber(next) {
 				break
 			}
 			end += nextWidth
@@ -336,7 +348,7 @@ func (t *Tokenizer) nextPiece(text string, pos int) (int, int) {
 				break
 			}
 			next, nextWidth := utf8.DecodeRuneInString(text[end:])
-			if unicode.IsSpace(next) || unicode.IsLetter(next) || unicode.IsDigit(next) {
+			if unicode.IsSpace(next) || unicode.IsLetter(next) || unicode.IsNumber(next) {
 				break
 			}
 			end += nextWidth
@@ -350,7 +362,7 @@ func (t *Tokenizer) nextPiece(text string, pos int) (int, int) {
 		}
 		return pos, end
 	}
-	return pos, t.consumeWhile(text, pos, unicode.IsSpace)
+	return pos, t.consumeWhitespace(text, pos)
 }
 
 func (t *Tokenizer) consumeWhile(text string, pos int, pred func(rune) bool) int {
@@ -368,6 +380,33 @@ func (t *Tokenizer) consumeWhile(text string, pos int, pred func(rune) bool) int
 	return end
 }
 
+func (t *Tokenizer) consumeWhitespace(text string, pos int) int {
+	end := pos
+	lastNewlineEnd := -1
+	lastWhitespaceStart := pos
+	for end < len(text) {
+		if _, _, ok := t.matchSpecial(text, end); ok {
+			break
+		}
+		r, width := utf8.DecodeRuneInString(text[end:])
+		if !unicode.IsSpace(r) {
+			break
+		}
+		lastWhitespaceStart = end
+		end += width
+		if r == '\r' || r == '\n' {
+			lastNewlineEnd = end
+		}
+	}
+	if lastNewlineEnd >= 0 {
+		return lastNewlineEnd
+	}
+	if end == len(text) || lastWhitespaceStart == pos {
+		return end
+	}
+	return lastWhitespaceStart
+}
+
 func matchContraction(text string, pos int) int {
 	for _, suffix := range contractionSuffixes {
 		if len(text)-pos >= len(suffix) && strings.EqualFold(text[pos:pos+len(suffix)], suffix) {
@@ -378,7 +417,7 @@ func matchContraction(text string, pos int) int {
 }
 
 func isOptionalLetterPrefix(text string, pos int, r rune, width int) bool {
-	if r == '\r' || r == '\n' || unicode.IsLetter(r) || unicode.IsDigit(r) {
+	if r == '\r' || r == '\n' || unicode.IsLetter(r) || unicode.IsNumber(r) {
 		return false
 	}
 	nextPos := pos + width
@@ -390,10 +429,10 @@ func isOptionalLetterPrefix(text string, pos int, r rune, width int) bool {
 }
 
 func isSymbolPrefix(text string, pos int, r rune, width int) bool {
-	if !unicode.IsSpace(r) && !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+	if !unicode.IsSpace(r) && !unicode.IsLetter(r) && !unicode.IsNumber(r) {
 		return true
 	}
-	if !unicode.IsSpace(r) || r == '\r' || r == '\n' {
+	if r != ' ' {
 		return false
 	}
 	nextPos := pos + width
@@ -401,7 +440,7 @@ func isSymbolPrefix(text string, pos int, r rune, width int) bool {
 		return false
 	}
 	next, _ := utf8.DecodeRuneInString(text[nextPos:])
-	return !unicode.IsSpace(next) && !unicode.IsLetter(next) && !unicode.IsDigit(next)
+	return !unicode.IsSpace(next) && !unicode.IsLetter(next) && !unicode.IsNumber(next)
 }
 
 func gpt2ByteToRunes(b byte) []rune {
