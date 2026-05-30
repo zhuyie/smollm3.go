@@ -430,12 +430,7 @@ func (t *Transformer) Forward(token int, pos int) []float32 {
 
 			// Weighted sum of cached values produces this head's slice of s.XB.
 			xb := s.XB[h*headSize : (h+1)*headSize]
-			clear(xb)
-			for ts := 0; ts <= pos; ts++ {
-				v := s.ValueCache[loff+ts*kvDim+headOff : loff+ts*kvDim+headOff+headSize]
-				a := att[ts]
-				addScaledF32(xb, v, a)
-			}
+			attentionValue(xb, att[:pos+1], s.ValueCache[loff:], pos+1, kvDim, headOff)
 		}
 
 		// Attention output projection plus residual connection.
@@ -564,11 +559,7 @@ func (t *Transformer) Prefill(tokens []int, startPos int) []float32 {
 				softmax(att[:pos+1])
 
 				xbh := xbrow[h*headSize : (h+1)*headSize]
-				clear(xbh)
-				for ts := 0; ts <= pos; ts++ {
-					v := s.ValueCache[loff+ts*kvDim+headOff : loff+ts*kvDim+headOff+headSize]
-					addScaledF32(xbh, v, att[ts])
-				}
+				attentionValue(xbh, att[:pos+1], s.ValueCache[loff:], pos+1, kvDim, headOff)
 			}
 		}
 

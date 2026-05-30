@@ -223,3 +223,63 @@ addscaled_rem4:
 
 addscaled_done:
 	RET
+
+// func attentionValueARM64(out, att, values []float32, steps, stride, offset int)
+// Accumulates out[i] += att[t] * values[t*stride+offset+i] for t in [0, steps).
+// The Go wrapper clears out first and only calls this for out lengths that are
+// multiples of 4.
+TEXT ·attentionValueARM64(SB), NOSPLIT, $0-104
+	MOVD	out_base+0(FP), R0
+	MOVD	out_len+8(FP), R2
+	MOVD	att_base+24(FP), R1
+	MOVD	values_base+48(FP), R3
+	MOVD	steps+72(FP), R4
+	MOVD	stride+80(FP), R5
+	MOVD	offset+88(FP), R6
+
+	LSL	$2, R5, R5 // stride in bytes
+	LSL	$2, R6, R6 // offset in bytes
+	ADD	R6, R3, R8 // current value row
+	CBZ	R4, attvalue_done
+
+attvalue_outer:
+	FMOVS	(R1), F0
+	ADD	$4, R1
+	VDUP	V0.S[0], V0.S4
+	MOVD	R0, R9
+	MOVD	R8, R10
+
+	LSR	$3, R2, R11
+	CBZ	R11, attvalue_rem4
+
+attvalue_loop8:
+	MOVD	R9, R12
+	VLD1.P	16(R10), [V1.S4]
+	VLD1.P	16(R10), [V2.S4]
+	VLD1.P	16(R9), [V3.S4]
+	VLD1	(R9), [V4.S4]
+	WORD	$0x4E21CC03 // FMLA V3.4S, V0.4S, V1.4S
+	WORD	$0x4E22CC04 // FMLA V4.4S, V0.4S, V2.4S
+	VST1.P	[V3.S4], 16(R12)
+	VST1	[V4.S4], (R12)
+	ADD	$16, R9
+	SUB	$1, R11
+	CBNZ	R11, attvalue_loop8
+
+attvalue_rem4:
+	AND	$7, R2, R11
+	LSR	$2, R11, R11
+	CBZ	R11, attvalue_next
+
+	VLD1.P	16(R10), [V1.S4]
+	VLD1	(R9), [V3.S4]
+	WORD	$0x4E21CC03 // FMLA V3.4S, V0.4S, V1.4S
+	VST1	[V3.S4], (R9)
+
+attvalue_next:
+	ADD	R5, R8, R8
+	SUB	$1, R4
+	CBNZ	R4, attvalue_outer
+
+attvalue_done:
+	RET

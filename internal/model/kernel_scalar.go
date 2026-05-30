@@ -65,3 +65,14 @@ func addScaledF32Scalar(dst []float32, src []float32, scale float32) {
 		dst[i] += scale * src[i]
 	}
 }
+
+func attentionValueScalar(out []float32, att []float32, values []float32, steps int, stride int, offset int) {
+	clear(out)
+	for ts := 0; ts < steps; ts++ {
+		v := values[ts*stride+offset : ts*stride+offset+len(out)]
+		a := att[ts]
+		for i := range out {
+			out[i] += a * v[i]
+		}
+	}
+}

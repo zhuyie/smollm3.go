@@ -9,6 +9,7 @@ func dotF32ARM64(a []float32, b []float32) float32
 func dotF32Batch4ARM64(x0 []float32, x1 []float32, x2 []float32, x3 []float32, w []float32) (float32, float32, float32, float32)
 func dotInt8ARM64(x []int8, w []int8) int32
 func addScaledF32ARM64(dst []float32, src []float32, scale float32)
+func attentionValueARM64(out []float32, att []float32, values []float32, steps int, stride int, offset int)
 
 func dotF32(a []float32, b []float32) float32 {
 	n := min(len(a), len(b))
@@ -58,4 +59,13 @@ func addScaledF32(dst []float32, src []float32, scale float32) {
 	if vecN < n {
 		addScaledF32Scalar(dst[vecN:n], src[vecN:n], scale)
 	}
+}
+
+func attentionValue(out []float32, att []float32, values []float32, steps int, stride int, offset int) {
+	if len(out) >= simdMinN && len(out)&3 == 0 {
+		clear(out)
+		attentionValueARM64(out, att[:steps], values, steps, stride, offset)
+		return
+	}
+	attentionValueScalar(out, att, values, steps, stride, offset)
 }

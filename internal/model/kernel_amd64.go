@@ -74,3 +74,7 @@ func addScaledF32(dst []float32, src []float32, scale float32) {
 		addScaledF32Scalar(dst[vecN:n], src[vecN:n], scale)
 	}
 }
+
+func attentionValue(out []float32, att []float32, values []float32, steps int, stride int, offset int) {
+	attentionValueScalar(out, att, values, steps, stride, offset)
+}

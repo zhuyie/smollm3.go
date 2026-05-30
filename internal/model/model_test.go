@@ -270,6 +270,31 @@ func TestMatmulBatchInt8MatchesFloatMatmul(t *testing.T) {
 	}
 }
 
+func TestAttentionValue(t *testing.T) {
+	steps := 7
+	stride := 80
+	offset := 8
+	width := 64
+	att := fillTestWeights(steps)
+	values := fillTestWeights(steps * stride)
+	got := make([]float32, width)
+	want := make([]float32, width)
+
+	attentionValue(got, att, values, steps, stride, offset)
+	for ts := 0; ts < steps; ts++ {
+		v := values[ts*stride+offset : ts*stride+offset+width]
+		for i := range want {
+			want[i] += att[ts] * v[i]
+		}
+	}
+
+	for i := range want {
+		if math.Abs(float64(got[i]-want[i])) > 1e-6 {
+			t.Fatalf("out[%d] = %f, want %f", i, got[i], want[i])
+		}
+	}
+}
+
 func TestForwardInt8MatchesFloat(t *testing.T) {
 	cfg := Config{
 		Dim:        8,
