@@ -33,6 +33,22 @@ func TestRenderChatPromptUsesDefaultSystemPrompt(t *testing.T) {
 	}
 }
 
+func TestRenderToolResultPromptIncludesToolExchange(t *testing.T) {
+	toolRequest := `<tool_call>{"name":"get_product_price","arguments":{"product":"notebook"}}</tool_call>`
+	got := renderToolResultPrompt("price?", toolRequest, []toolResultItem{{Name: "get_product_price", Result: "12"}})
+
+	for _, want := range []string{
+		"<|im_start|>user\nprice?<|im_end|>",
+		"<|im_start|>assistant\n<think>\n\n</think>\n" + toolRequest + "<|im_end|>",
+		"<tool_response>\n{\"name\":\"get_product_price\",\"result\":\"12\"}\n</tool_response>",
+		"<|im_start|>assistant\n<think>\n\n</think>\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("renderToolResultPrompt() missing %q in %q", want, got)
+		}
+	}
+}
+
 func TestParseToolCalls(t *testing.T) {
 	tests := []struct {
 		name string
