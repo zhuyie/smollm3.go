@@ -35,6 +35,24 @@ type Tokenizer struct {
 	UNKID          int
 	MaxTokenLength int
 	SpecialIDs     []int
+
+	byteTokenIDs      [256]int
+	byteTokenIDsReady bool
+}
+
+var (
+	contractionSuffixes = []string{"'s", "'t", "'re", "'ve", "'m", "'ll", "'d"}
+	gpt2ByteTokens      [256]string
+	gpt2RuneToByte      map[rune]byte
+)
+
+func init() {
+	gpt2RuneToByte = make(map[rune]byte, 256)
+	for i := 0; i < 256; i++ {
+		cp := computeGPT2ByteCodepoint(byte(i))
+		gpt2ByteTokens[i] = string(cp)
+		gpt2RuneToByte[cp] = byte(i)
+	}
 }
 
 func Load(path string, expectedVocabSize int) (*Tokenizer, error) {
@@ -62,6 +80,9 @@ func Load(path string, expectedVocabSize int) (*Tokenizer, error) {
 			return nil, err
 		}
 	}
+	if vocabSize < 0 || mergeCount < 0 || maxTokenLength < 0 || specialCount < 0 {
+		return nil, fmt.Errorf("bad tokenizer counts: vocab=%d merges=%d max_token_length=%d specials=%d", vocabSize, mergeCount, maxTokenLength, specialCount)
+	}
 	if int(vocabSize) != expectedVocabSize {
 		return nil, fmt.Errorf("tokenizer vocab size %d does not match model vocab size %d", vocabSize, expectedVocabSize)
 	}
@@ -85,6 +106,9 @@ func Load(path string, expectedVocabSize int) (*Tokenizer, error) {
 		if err := binary.Read(file, binary.LittleEndian, &n); err != nil {
 			return nil, err
 		}
+		if n > uint32(maxTokenLength) {
+			return nil, fmt.Errorf("token %d length %d exceeds max token length %d", i, n, maxTokenLength)
+		}
 		buf := make([]byte, n)
 		if _, err := io.ReadFull(file, buf); err != nil {
 			return nil, err
@@ -107,6 +131,9 @@ func Load(path string, expectedVocabSize int) (*Tokenizer, error) {
 		if err := binary.Read(file, binary.LittleEndian, &out); err != nil {
 			return nil, err
 		}
+		if left < 0 || left >= vocabSize || right < 0 || right >= vocabSize || out < 0 || out >= vocabSize {
+			return nil, fmt.Errorf("merge rule %d has out-of-range ids: left=%d right=%d out=%d vocab=%d", i, left, right, out, vocabSize)
+		}
 		rule := MergeRule{Left: int(left), Right: int(right), Out: int(out), Rank: i}
 		tok.MergeRanks[[2]int{rule.Left, rule.Right}] = rule
 	}
@@ -115,10 +142,12 @@ func Load(path string, expectedVocabSize int) (*Tokenizer, error) {
 		if err := binary.Read(file, binary.LittleEndian, &id); err != nil {
 			return nil, err
 		}
-		if id >= 0 && id < vocabSize {
-			tok.SpecialIDs = append(tok.SpecialIDs, int(id))
+		if id < 0 || id >= vocabSize {
+			return nil, fmt.Errorf("special token %d has out-of-range id %d for vocab %d", i, id, vocabSize)
 		}
+		tok.SpecialIDs = append(tok.SpecialIDs, int(id))
 	}
+	tok.initByteTokenIDs()
 	tok.ensureSpecialIDs()
 	return tok, nil
 }
@@ -204,17 +233,32 @@ func (t *Tokenizer) ensureSpecialIDs() {
 	}
 }
 
+func (t *Tokenizer) initByteTokenIDs() {
+	fallback := t.UNKID
+	for i := range t.byteTokenIDs {
+		t.byteTokenIDs[i] = fallback
+	}
+	for b, piece := range gpt2ByteTokens {
+		if id, ok := t.TokenToID[piece]; ok {
+			t.byteTokenIDs[b] = id
+		}
+	}
+	t.byteTokenIDsReady = true
+}
+
+func (t *Tokenizer) byteTokenID(b byte) int {
+	if !t.byteTokenIDsReady {
+		t.initByteTokenIDs()
+	}
+	return t.byteTokenIDs[b]
+}
+
 func (t *Tokenizer) encodePiece(bytes []byte) []int {
 	// Initialize one token per byte using GPT-2's reversible byte-to-unicode
 	// mapping, then repeatedly apply the best-ranked adjacent merge.
 	tokens := make([]int, 0, len(bytes))
 	for _, b := range bytes {
-		piece := string(gpt2ByteToRunes(b))
-		id, ok := t.TokenToID[piece]
-		if !ok {
-			id = t.UNKID
-		}
-		tokens = append(tokens, id)
+		tokens = append(tokens, t.byteTokenID(b))
 	}
 	for {
 		bestIdx := -1
@@ -325,7 +369,7 @@ func (t *Tokenizer) consumeWhile(text string, pos int, pred func(rune) bool) int
 }
 
 func matchContraction(text string, pos int) int {
-	for _, suffix := range []string{"'s", "'t", "'re", "'ve", "'m", "'ll", "'d"} {
+	for _, suffix := range contractionSuffixes {
 		if len(text)-pos >= len(suffix) && strings.EqualFold(text[pos:pos+len(suffix)], suffix) {
 			return pos + len(suffix)
 		}
@@ -361,17 +405,21 @@ func isSymbolPrefix(text string, pos int, r rune, width int) bool {
 }
 
 func gpt2ByteToRunes(b byte) []rune {
-	cp := gpt2ByteToCodepoint(b)
+	cp := computeGPT2ByteCodepoint(b)
 	return []rune{cp}
 }
 
 func gpt2ByteToCodepoint(b byte) rune {
-	if (b >= 33 && b <= 126) || (b >= 161 && b <= 172) || (b >= 174 && b <= 255) {
+	return computeGPT2ByteCodepoint(b)
+}
+
+func computeGPT2ByteCodepoint(b byte) rune {
+	if isGPT2DirectByte(int(b)) {
 		return rune(b)
 	}
 	n := 0
 	for i := 0; i < 256; i++ {
-		if (i >= 33 && i <= 126) || (i >= 161 && i <= 172) || (i >= 174 && i <= 255) {
+		if isGPT2DirectByte(i) {
 			continue
 		}
 		if byte(i) == b {
@@ -383,18 +431,10 @@ func gpt2ByteToCodepoint(b byte) rune {
 }
 
 func gpt2CodepointToByte(cp rune) (byte, bool) {
-	if (cp >= 33 && cp <= 126) || (cp >= 161 && cp <= 172) || (cp >= 174 && cp <= 255) {
-		return byte(cp), true
-	}
-	n := 0
-	for i := 0; i < 256; i++ {
-		if (i >= 33 && i <= 126) || (i >= 161 && i <= 172) || (i >= 174 && i <= 255) {
-			continue
-		}
-		if cp == rune(256+n) {
-			return byte(i), true
-		}
-		n++
-	}
-	return 0, false
+	b, ok := gpt2RuneToByte[cp]
+	return b, ok
+}
+
+func isGPT2DirectByte(i int) bool {
+	return (i >= 33 && i <= 126) || (i >= 161 && i <= 172) || (i >= 174 && i <= 255)
 }
