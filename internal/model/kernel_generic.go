@@ -28,3 +28,7 @@ func addScaledF32(dst []float32, src []float32, scale float32) {
 func attentionValue(out []float32, att []float32, values []float32, steps int, stride int, offset int) {
 	attentionValueScalar(out, att, values, steps, stride, offset)
 }
+
+func attentionScores(out []float32, q []float32, keys []float32, steps int, stride int, offset int, scale float32) {
+	attentionScoresScalar(out, q, keys, steps, stride, offset, scale)
+}

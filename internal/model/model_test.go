@@ -295,6 +295,30 @@ func TestAttentionValue(t *testing.T) {
 	}
 }
 
+func TestAttentionScores(t *testing.T) {
+	steps := 7
+	stride := 80
+	offset := 8
+	width := 64
+	scale := float32(0.25)
+	q := fillTestWeights(width)
+	keys := fillTestWeights(steps * stride)
+	got := make([]float32, steps)
+	want := make([]float32, steps)
+
+	attentionScores(got, q, keys, steps, stride, offset, scale)
+	for ts := 0; ts < steps; ts++ {
+		k := keys[ts*stride+offset : ts*stride+offset+width]
+		want[ts] = dotF32Scalar(q, k) * scale
+	}
+
+	for i := range want {
+		if math.Abs(float64(got[i]-want[i])) > 1e-6 {
+			t.Fatalf("out[%d] = %f, want %f", i, got[i], want[i])
+		}
+	}
+}
+
 func TestForwardInt8MatchesFloat(t *testing.T) {
 	cfg := Config{
 		Dim:        8,

@@ -76,3 +76,29 @@ func attentionValueScalar(out []float32, att []float32, values []float32, steps 
 		}
 	}
 }
+
+func attentionScoresScalar(out []float32, q []float32, keys []float32, steps int, stride int, offset int, scale float32) {
+	for ts := 0; ts < steps; ts++ {
+		k := keys[ts*stride+offset : ts*stride+offset+len(q)]
+		out[ts] = dotF32Scalar(q, k) * scale
+	}
+}
+
+func attentionScoresBatch4(out []float32, q []float32, keys []float32, steps int, stride int, offset int, scale float32) {
+	ts := 0
+	for ; ts+3 < steps; ts += 4 {
+		k0 := keys[ts*stride+offset : ts*stride+offset+len(q)]
+		k1 := keys[(ts+1)*stride+offset : (ts+1)*stride+offset+len(q)]
+		k2 := keys[(ts+2)*stride+offset : (ts+2)*stride+offset+len(q)]
+		k3 := keys[(ts+3)*stride+offset : (ts+3)*stride+offset+len(q)]
+		v0, v1, v2, v3 := dotF32Batch4(k0, k1, k2, k3, q)
+		out[ts] = v0 * scale
+		out[ts+1] = v1 * scale
+		out[ts+2] = v2 * scale
+		out[ts+3] = v3 * scale
+	}
+	for ; ts < steps; ts++ {
+		k := keys[ts*stride+offset : ts*stride+offset+len(q)]
+		out[ts] = dotF32(q, k) * scale
+	}
+}

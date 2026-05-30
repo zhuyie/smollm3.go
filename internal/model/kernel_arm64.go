@@ -69,3 +69,7 @@ func attentionValue(out []float32, att []float32, values []float32, steps int, s
 	}
 	attentionValueScalar(out, att, values, steps, stride, offset)
 }
+
+func attentionScores(out []float32, q []float32, keys []float32, steps int, stride int, offset int, scale float32) {
+	attentionScoresBatch4(out, q, keys, steps, stride, offset, scale)
+}

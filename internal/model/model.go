@@ -422,10 +422,7 @@ func (t *Transformer) Forward(token int, pos int) []float32 {
 			headOff := kvHead * headSize
 			// Score this query head against every cached key up to pos. This is
 			// the only O(sequence length) part of a single-token decoding step.
-			for ts := 0; ts <= pos; ts++ {
-				k := s.KeyCache[loff+ts*kvDim+headOff : loff+ts*kvDim+headOff+headSize]
-				att[ts] = dotF32(q, k) * attScale
-			}
+			attentionScores(att[:pos+1], q, s.KeyCache[loff:], pos+1, kvDim, headOff, attScale)
 			softmax(att[:pos+1])
 
 			// Weighted sum of cached values produces this head's slice of s.XB.
@@ -552,10 +549,7 @@ func (t *Transformer) Prefill(tokens []int, startPos int) []float32 {
 				att := s.Att[h*cfg.SeqLen : (h+1)*cfg.SeqLen]
 				kvHead := h / kvMul
 				headOff := kvHead * headSize
-				for ts := 0; ts <= pos; ts++ {
-					k := s.KeyCache[loff+ts*kvDim+headOff : loff+ts*kvDim+headOff+headSize]
-					att[ts] = dotF32(q, k) * attScale
-				}
+				attentionScores(att[:pos+1], q, s.KeyCache[loff:], pos+1, kvDim, headOff, attScale)
 				softmax(att[:pos+1])
 
 				xbh := xbrow[h*headSize : (h+1)*headSize]
