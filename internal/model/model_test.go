@@ -198,18 +198,22 @@ func TestMatmul(t *testing.T) {
 	}
 }
 
-func TestDotF32Int8(t *testing.T) {
-	x := []float32{1.5, -2, 0.25, 4, -3, 2.5, 1, -0.5, 0.75, -1.25, 3, -4, 2, 1.25, -0.75, 0.5}
-	w := []int8{3, -4, 5, 6, -7, 8, 9, -10, 11, -12, 13, -14, 15, -16, 17, -18}
-	got := dotF32Int8(x, w)
-	want := dotF32Int8Scalar(x, w)
-	if math.Abs(float64(got-want)) > 1e-5 {
-		t.Fatalf("dotF32Int8 = %f, want %f", got, want)
+func TestDotInt8(t *testing.T) {
+	x := make([]int8, 64)
+	w := make([]int8, 64)
+	for i := range x {
+		x[i] = int8(i%17 - 8)
+		w[i] = int8(7 - i%13)
+	}
+	got := dotInt8(x, w)
+	want := dotInt8Scalar(x, w)
+	if got != want {
+		t.Fatalf("dotInt8 = %d, want %d", got, want)
 	}
 }
 
 func TestMatmulInt8MatchesFloatMatmul(t *testing.T) {
-	n := 16
+	n := 64
 	d := 8
 	x := fillTestWeights(n)
 	w := fillTestWeights(n * d)
@@ -217,12 +221,100 @@ func TestMatmulInt8MatchesFloatMatmul(t *testing.T) {
 	got := make([]float32, d)
 	want := make([]float32, d)
 
-	matmulInt8(got, x, q, n, d)
+	// Tests call the low-level helper directly, so they provide scratch
+	// explicitly. Transformer inference uses State-owned scratch instead.
+	matmulInt8WithScratch(got, x, q, n, d, make([]int8, n))
 	matmul(want, x, w, n, d)
 
 	for i := range want {
 		if math.Abs(float64(got[i]-want[i])) > 0.001 {
 			t.Fatalf("out[%d] = %f, want near %f", i, got[i], want[i])
+		}
+	}
+}
+
+func TestMatmulInt8ZeroActivation(t *testing.T) {
+	n := 64
+	d := 8
+	x := make([]float32, n)
+	w := fillTestWeights(n * d)
+	q := quantizeMatrixInt8(w, n, d)
+	got := make([]float32, d)
+
+	matmulInt8WithScratch(got, x, q, n, d, make([]int8, n))
+
+	for i, v := range got {
+		if v != 0 {
+			t.Fatalf("out[%d] = %f, want 0", i, v)
+		}
+	}
+}
+
+func TestMatmulBatchInt8MatchesFloatMatmul(t *testing.T) {
+	batch := 4
+	n := 64
+	d := 8
+	x := fillTestWeights(batch * n)
+	w := fillTestWeights(n * d)
+	q := quantizeMatrixInt8(w, n, d)
+	got := make([]float32, batch*d)
+	want := make([]float32, batch*d)
+
+	matmulBatchInt8WithScratch(got, x, q, batch, n, d, make([]int8, batch*n), make([]float32, batch))
+	matmulBatch(want, x, w, batch, n, d)
+
+	for i := range want {
+		if math.Abs(float64(got[i]-want[i])) > 0.001 {
+			t.Fatalf("out[%d] = %f, want near %f", i, got[i], want[i])
+		}
+	}
+}
+
+func TestAttentionValue(t *testing.T) {
+	steps := 7
+	stride := 80
+	offset := 8
+	width := 64
+	att := fillTestWeights(steps)
+	values := fillTestWeights(steps * stride)
+	got := make([]float32, width)
+	want := make([]float32, width)
+
+	attentionValue(got, att, values, steps, stride, offset)
+	for ts := 0; ts < steps; ts++ {
+		v := values[ts*stride+offset : ts*stride+offset+width]
+		for i := range want {
+			want[i] += att[ts] * v[i]
+		}
+	}
+
+	for i := range want {
+		if math.Abs(float64(got[i]-want[i])) > 1e-6 {
+			t.Fatalf("out[%d] = %f, want %f", i, got[i], want[i])
+		}
+	}
+}
+
+func TestAttentionScores(t *testing.T) {
+	steps := 7
+	stride := 80
+	offset := 8
+	width := 64
+	scale := float32(0.25)
+	q := fillTestWeights(width)
+	keys := fillTestWeights(steps * stride)
+	got := make([]float32, steps)
+	want := make([]float32, steps)
+
+	attentionScores(got, q, keys, steps, stride, offset, scale)
+	for ts := 0; ts < steps; ts++ {
+		k := keys[ts*stride+offset : ts*stride+offset+width]
+		want[ts] = dotF32Scalar(q, k) * scale
+	}
+
+	for i := range want {
+		if math.Abs(float64(got[i]-want[i])) > 1e-6 {
+			t.Fatalf("out[%d] = %f, want %f", i, got[i], want[i])
 		}
 	}
 }

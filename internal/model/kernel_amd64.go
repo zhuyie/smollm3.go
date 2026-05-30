@@ -10,7 +10,6 @@ var useAVX2 = hasAVX2AMD64()
 func hasAVX2AMD64() bool
 func dotF32AMD64(a []float32, b []float32) float32
 func dotF32Batch4AMD64(x0 []float32, x1 []float32, x2 []float32, x3 []float32, w []float32) (float32, float32, float32, float32)
-func dotF32Int8AMD64(x []float32, w []int8) float32
 func addScaledF32AMD64(dst []float32, src []float32, scale float32)
 
 func dotF32(a []float32, b []float32) float32 {
@@ -43,17 +42,9 @@ func dotF32Batch4(x0 []float32, x1 []float32, x2 []float32, x3 []float32, w []fl
 	return dotF32Batch4Scalar(x0[:n], x1[:n], x2[:n], x3[:n], w[:n])
 }
 
-func dotF32Int8(x []float32, w []int8) float32 {
+func dotInt8(x []int8, w []int8) int32 {
 	n := min(len(x), len(w))
-	vecN := n &^ 31
-	if useAVX2 && vecN >= simdMinN {
-		val := dotF32Int8AMD64(x[:vecN], w[:vecN])
-		if vecN < n {
-			val += dotF32Int8Scalar(x[vecN:n], w[vecN:n])
-		}
-		return val
-	}
-	return dotF32Int8Scalar(x[:n], w[:n])
+	return dotInt8Scalar(x[:n], w[:n])
 }
 
 func matmulF32(out []float32, x []float32, w []float32, n int, d int) {
@@ -82,4 +73,12 @@ func addScaledF32(dst []float32, src []float32, scale float32) {
 	if vecN < n {
 		addScaledF32Scalar(dst[vecN:n], src[vecN:n], scale)
 	}
+}
+
+func attentionValue(out []float32, att []float32, values []float32, steps int, stride int, offset int) {
+	attentionValueScalar(out, att, values, steps, stride, offset)
+}
+
+func attentionScores(out []float32, q []float32, keys []float32, steps int, stride int, offset int, scale float32) {
+	attentionScoresBatch4(out, q, keys, steps, stride, offset, scale)
 }

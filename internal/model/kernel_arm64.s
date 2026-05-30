@@ -144,10 +144,10 @@ dot_batch4_reduce:
 	FMOVS	F3, ret3+132(FP)
 	RET
 
-// func dotF32Int8ARM64(x []float32, w []int8) float32
-// Computes sum(x[i] * float32(w[i])). The Go wrapper only calls this for
+// func dotInt8ARM64(x []int8, w []int8) int32
+// Computes sum(int32(x[i]) * int32(w[i])). The Go wrapper only calls this for
 // lengths that are multiples of 16.
-TEXT ·dotF32Int8ARM64(SB), NOSPLIT, $0-52
+TEXT ·dotInt8ARM64(SB), NOSPLIT, $0-52
 	MOVD	x_base+0(FP), R0
 	MOVD	x_len+8(FP), R2
 	MOVD	w_len+32(FP), R3
@@ -157,43 +157,32 @@ TEXT ·dotF32Int8ARM64(SB), NOSPLIT, $0-52
 
 	VEOR	V0.B16, V0.B16, V0.B16
 	VEOR	V1.B16, V1.B16, V1.B16
-	VEOR	V2.B16, V2.B16, V2.B16
-	VEOR	V3.B16, V3.B16, V3.B16
 
-	LSR	$4, R2, R3
+	LSR	$5, R2, R3
+	CBZ	R3, dot_i8_rem16
 
-dot_f32_i8_loop16:
-	VLD1.P	16(R1), [V4.B16]
-	VLD1.P	16(R0), [V11.S4]
-	VLD1.P	16(R0), [V12.S4]
-	VLD1.P	16(R0), [V13.S4]
-	VLD1.P	16(R0), [V14.S4]
-
-	WORD	$0x0F08A485 // SSHLL  V5.8H, V4.8B, #0
-	WORD	$0x4F08A486 // SSHLL2 V6.8H, V4.16B, #0
-	WORD	$0x0F10A4A7 // SSHLL  V7.4S, V5.4H, #0
-	WORD	$0x4F10A4A8 // SSHLL2 V8.4S, V5.8H, #0
-	WORD	$0x0F10A4C9 // SSHLL  V9.4S, V6.4H, #0
-	WORD	$0x4F10A4CA // SSHLL2 V10.4S, V6.8H, #0
-	WORD	$0x4E21D8E7 // SCVTF V7.4S, V7.4S
-	WORD	$0x4E21D908 // SCVTF V8.4S, V8.4S
-	WORD	$0x4E21D929 // SCVTF V9.4S, V9.4S
-	WORD	$0x4E21D94A // SCVTF V10.4S, V10.4S
-	WORD	$0x4E27CD60 // FMLA V0.4S, V11.4S, V7.4S
-	WORD	$0x4E28CD81 // FMLA V1.4S, V12.4S, V8.4S
-	WORD	$0x4E29CDA2 // FMLA V2.4S, V13.4S, V9.4S
-	WORD	$0x4E2ACDC3 // FMLA V3.4S, V14.4S, V10.4S
-
+dot_i8_loop32:
+	VLD1.P	16(R0), [V2.B16]
+	VLD1.P	16(R1), [V3.B16]
+	VLD1.P	16(R0), [V4.B16]
+	VLD1.P	16(R1), [V5.B16]
+	WORD	$0x4E839440 // SDOT V0.4S, V2.16B, V3.16B
+	WORD	$0x4E859481 // SDOT V1.4S, V4.16B, V5.16B
 	SUB	$1, R3
-	CBNZ	R3, dot_f32_i8_loop16
+	CBNZ	R3, dot_i8_loop32
 
-	WORD	$0x4E21D400 // FADD V0.4S, V0.4S, V1.4S
-	WORD	$0x4E23D442 // FADD V2.4S, V2.4S, V3.4S
-	WORD	$0x4E22D400 // FADD V0.4S, V0.4S, V2.4S
-	WORD	$0x6E20D400 // FADDP V0.4S, V0.4S, V0.4S
-	WORD	$0x7E30D800 // FADDP S0, V0.2S
+dot_i8_rem16:
+	AND	$16, R2, R3
+	CBZ	R3, dot_i8_reduce
+	VLD1.P	16(R0), [V2.B16]
+	VLD1.P	16(R1), [V3.B16]
+	WORD	$0x4E839440 // SDOT V0.4S, V2.16B, V3.16B
 
-	FMOVS	F0, ret+48(FP)
+dot_i8_reduce:
+	WORD	$0x4EA18400 // ADD V0.4S, V0.4S, V1.4S
+	WORD	$0x4EB1B800 // ADDV S0, V0.4S
+	VMOV	V0.S[0], R0
+	MOVW	R0, ret+48(FP)
 	RET
 
 // func addScaledF32ARM64(dst, src []float32, scale float32)
@@ -233,4 +222,64 @@ addscaled_rem4:
 	VST1.P	[V3.S4], 16(R0)
 
 addscaled_done:
+	RET
+
+// func attentionValueARM64(out, att, values []float32, steps, stride, offset int)
+// Accumulates out[i] += att[t] * values[t*stride+offset+i] for t in [0, steps).
+// The Go wrapper clears out first and only calls this for out lengths that are
+// multiples of 4.
+TEXT ·attentionValueARM64(SB), NOSPLIT, $0-104
+	MOVD	out_base+0(FP), R0
+	MOVD	out_len+8(FP), R2
+	MOVD	att_base+24(FP), R1
+	MOVD	values_base+48(FP), R3
+	MOVD	steps+72(FP), R4
+	MOVD	stride+80(FP), R5
+	MOVD	offset+88(FP), R6
+
+	LSL	$2, R5, R5 // stride in bytes
+	LSL	$2, R6, R6 // offset in bytes
+	ADD	R6, R3, R8 // current value row
+	CBZ	R4, attvalue_done
+
+attvalue_outer:
+	FMOVS	(R1), F0
+	ADD	$4, R1
+	VDUP	V0.S[0], V0.S4
+	MOVD	R0, R9
+	MOVD	R8, R10
+
+	LSR	$3, R2, R11
+	CBZ	R11, attvalue_rem4
+
+attvalue_loop8:
+	MOVD	R9, R12
+	VLD1.P	16(R10), [V1.S4]
+	VLD1.P	16(R10), [V2.S4]
+	VLD1.P	16(R9), [V3.S4]
+	VLD1	(R9), [V4.S4]
+	WORD	$0x4E21CC03 // FMLA V3.4S, V0.4S, V1.4S
+	WORD	$0x4E22CC04 // FMLA V4.4S, V0.4S, V2.4S
+	VST1.P	[V3.S4], 16(R12)
+	VST1	[V4.S4], (R12)
+	ADD	$16, R9
+	SUB	$1, R11
+	CBNZ	R11, attvalue_loop8
+
+attvalue_rem4:
+	AND	$7, R2, R11
+	LSR	$2, R11, R11
+	CBZ	R11, attvalue_next
+
+	VLD1.P	16(R10), [V1.S4]
+	VLD1	(R9), [V3.S4]
+	WORD	$0x4E21CC03 // FMLA V3.4S, V0.4S, V1.4S
+	VST1	[V3.S4], (R9)
+
+attvalue_next:
+	ADD	R5, R8, R8
+	SUB	$1, R4
+	CBNZ	R4, attvalue_outer
+
+attvalue_done:
 	RET

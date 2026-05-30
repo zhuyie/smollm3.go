@@ -142,59 +142,6 @@ batch4_reduce:
 	VZEROUPPER
 	RET
 
-// func dotF32Int8AMD64(x []float32, w []int8) float32
-// Computes sum(x[i] * float32(w[i])). The Go wrapper calls this for lengths
-// that are multiples of 32.
-TEXT ·dotF32Int8AMD64(SB), NOSPLIT, $0-52
-	MOVQ x_base+0(FP), AX
-	MOVQ x_len+8(FP), CX
-	MOVQ w_base+24(FP), BX
-
-	VXORPS Y0, Y0, Y0
-	VXORPS Y1, Y1, Y1
-	VXORPS Y2, Y2, Y2
-	VXORPS Y3, Y3, Y3
-	SHRQ $5, CX
-	JZ dot_i8_reduce
-
-dot_i8_loop32:
-	VPMOVSXBD (BX), Y4
-	VPMOVSXBD 8(BX), Y5
-	VPMOVSXBD 16(BX), Y6
-	VPMOVSXBD 24(BX), Y7
-	VCVTDQ2PS Y4, Y4
-	VCVTDQ2PS Y5, Y5
-	VCVTDQ2PS Y6, Y6
-	VCVTDQ2PS Y7, Y7
-	VMOVUPS (AX), Y8
-	VMOVUPS 32(AX), Y9
-	VMOVUPS 64(AX), Y10
-	VMOVUPS 96(AX), Y11
-	VMULPS Y8, Y4, Y4
-	VMULPS Y9, Y5, Y5
-	VMULPS Y10, Y6, Y6
-	VMULPS Y11, Y7, Y7
-	VADDPS Y4, Y0, Y0
-	VADDPS Y5, Y1, Y1
-	VADDPS Y6, Y2, Y2
-	VADDPS Y7, Y3, Y3
-	ADDQ $128, AX
-	ADDQ $32, BX
-	DECQ CX
-	JNZ dot_i8_loop32
-
-dot_i8_reduce:
-	VADDPS Y1, Y0, Y0
-	VADDPS Y3, Y2, Y2
-	VADDPS Y2, Y0, Y0
-	VEXTRACTF128 $1, Y0, X1
-	VADDPS X1, X0, X0
-	VHADDPS X0, X0, X0
-	VHADDPS X0, X0, X0
-	VMOVSS X0, ret+48(FP)
-	VZEROUPPER
-	RET
-
 // func addScaledF32AMD64(dst, src []float32, scale float32)
 // The Go wrapper calls this with a length that is a multiple of 8.
 TEXT ·addScaledF32AMD64(SB), NOSPLIT, $0-52
