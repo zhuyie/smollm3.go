@@ -130,3 +130,51 @@ bin/smollm3 \
   -prompt "I have 40 dollars. Can I buy 3 notebooks, and how much money would be left?" \
   -temp 0
 ```
+
+## Use As A Library
+
+Other Go programs can import the root package and call the runtime directly:
+
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+
+	"smollm3go"
+)
+
+func main() {
+	client, err := smollm3.Load(smollm3.Config{
+		ModelPath:     "models/smollm3-3b-int8.bin",
+		TokenizerPath: "models/smollm3-tokenizer.bin",
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	text, stats, err := client.Generate(context.Background(), "The galaxy empire", smollm3.GenerateOptions{
+		MaxNewTokens: 128,
+		Temperature: 0,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("%s\n%.2f tok/s\n", text, stats.TokensPerSecond())
+}
+```
+
+For chat-style prompts, use `client.Chat` with a message history:
+
+```go
+reply, _, err := client.Chat(context.Background(), []smollm3.Message{
+	{Role: "user", Content: "Give me a brief explanation of gravity."},
+}, smollm3.ChatOptions{
+	GenerateOptions: smollm3.GenerateOptions{MaxNewTokens: 128, Temperature: 0},
+	Thinking:        true,
+})
+```
+
+`GenerateOptions.TokenCallback` receives decoded token pieces as they are produced, which is useful for streaming responses into an application UI. A loaded client owns mutable model state, so do not call generation methods concurrently on the same client.

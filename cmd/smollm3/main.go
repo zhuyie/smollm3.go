@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -12,15 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"smollm3go/internal/model"
-	"smollm3go/internal/sampler"
-	"smollm3go/internal/tokenizer"
+	"smollm3go"
 )
-
-type chatMessage struct {
-	role    string
-	content string
-}
 
 type toolCallItem struct {
 	Name      string         `json:"name"`
@@ -67,79 +61,71 @@ func main() {
 		*topP = 0.9
 	}
 
-	transformer, err := model.Load(*modelPath)
+	client, err := smollm3.Load(smollm3.Config{
+		ModelPath:     *modelPath,
+		TokenizerPath: *tokenizerPath,
+	})
 	if err != nil {
 		log.Fatal(err)
 	}
-	tok, err := tokenizer.Load(*tokenizerPath, transformer.Config.VocabSize)
-	if err != nil {
-		log.Fatal(err)
-	}
-	samp := sampler.New(float32(*temperature), float32(*topP), *seed)
 
 	switch *mode {
 	case "generate":
-		generate(transformer, tok, samp, *prompt, *maxNew)
+		generate(client, *prompt, *maxNew, *temperature, *topP, *seed)
 	case "chat":
-		chat(transformer, tok, samp, *prompt, *systemPrompt, *thinking, *maxNew)
+		chat(client, *prompt, *systemPrompt, *thinking, *maxNew, *temperature, *topP, *seed)
 	case "toolcall":
-		toolCall(transformer, tok, samp, *prompt, *maxNew)
+		toolCall(client, *prompt, *maxNew, *temperature, *topP, *seed)
 	default:
 		log.Fatalf("unknown mode %q", *mode)
 	}
 }
 
-func generate(t *model.Transformer, tok *tokenizer.Tokenizer, samp *sampler.Sampler, prompt string, maxNew int) {
-	ids := tok.Encode(prompt, false, false)
-	if len(ids) == 0 {
-		ids = append(ids, tok.EOS())
-	}
-	var logits []float32
-	pos := 0
-	// Prefill consumes the whole prompt and leaves logits for the next token.
-	if len(ids) > 0 && pos < t.Config.SeqLen {
-		end := min(len(ids), t.Config.SeqLen)
-		logits = t.Prefill(ids[:end], pos)
-		pos = end
-	}
-	generated := 0
-	token := -1
-	start := time.Time{}
-	for generated < maxNew && pos < t.Config.SeqLen {
-		next := samp.Sample(logits)
-		if next == tok.EOS() {
-			break
-		}
-		fmt.Print(tok.Decode(next))
-		// Decode one token at a time, appending its KV entries to the cache.
-		if token = next; token >= 0 {
-			logits = t.Forward(token, pos)
-			pos++
-		}
-		generated++
-		if start.IsZero() {
-			start = time.Now()
-		}
+func generate(client *smollm3.Client, prompt string, maxNew int, temperature float64, topP float64, seed int64) {
+	_, stats, err := client.Generate(context.Background(), prompt, smollm3.GenerateOptions{
+		MaxNewTokens: maxNew,
+		Temperature:  temperature,
+		TopP:         topP,
+		Seed:         seed,
+		TokenCallback: func(piece string) error {
+			fmt.Print(piece)
+			return nil
+		},
+	})
+	if err != nil {
+		log.Fatal(err)
 	}
 	fmt.Println()
-	if generated > 1 && !start.IsZero() {
-		tokPerSec := float64(generated) / time.Since(start).Seconds()
-		fmt.Fprintf(os.Stderr, "achieved tok/s: %.6f\n", tokPerSec)
+	if stats.GeneratedTokens > 1 && stats.Duration > 0 {
+		fmt.Fprintf(os.Stderr, "achieved tok/s: %.6f\n", stats.TokensPerSecond())
 	}
 }
 
-func chat(t *model.Transformer, tok *tokenizer.Tokenizer, samp *sampler.Sampler, userPrompt string, systemPrompt string, thinking bool, maxNew int) {
+func chat(client *smollm3.Client, userPrompt string, systemPrompt string, thinking bool, maxNew int, temperature float64, topP float64, seed int64) {
+	opts := smollm3.ChatOptions{
+		GenerateOptions: smollm3.GenerateOptions{
+			MaxNewTokens: maxNew,
+			Temperature:  temperature,
+			TopP:         topP,
+			Seed:         seed,
+			TokenCallback: func(piece string) error {
+				fmt.Fprint(os.Stdout, piece)
+				return nil
+			},
+		},
+		SystemPrompt: systemPrompt,
+		Thinking:     thinking,
+	}
 	if userPrompt != "" {
-		messages := []chatMessage{{role: "user", content: userPrompt}}
 		printAssistantPrefix(os.Stdout)
-		chatReply(t, tok, samp, renderChatPrompt(messages, systemPrompt, thinking), maxNew, os.Stdout)
+		if _, _, err := client.Chat(context.Background(), []smollm3.Message{{Role: "user", Content: userPrompt}}, opts); err != nil {
+			log.Fatal(err)
+		}
 		fmt.Println(ansiReset)
 		return
 	}
 
-	pos := 0
-	var logits []float32
-	logits, pos = forwardTokens(t, tok.Encode(renderSystemPrompt(systemPrompt, thinking), false, false), pos)
+	session := client.NewChatSession(opts)
 	totalGenerated := 0
 	totalDuration := time.Duration(0)
 	scanner := bufio.NewScanner(os.Stdin)
@@ -158,13 +144,13 @@ func chat(t *model.Transformer, tok *tokenizer.Tokenizer, samp *sampler.Sampler,
 			fmt.Println()
 			break
 		}
-		logits, pos = forwardTokens(t, tok.Encode(renderUserTurn(userPrompt, thinking), false, false), pos)
 		printAssistantPrefix(os.Stdout)
-		var generated int
-		var duration time.Duration
-		_, pos, generated, duration = generateAssistant(t, tok, samp, logits, pos, maxNew, os.Stdout)
-		totalGenerated += generated
-		totalDuration += duration
+		_, stats, err := session.Reply(context.Background(), userPrompt)
+		if err != nil {
+			log.Fatal(err)
+		}
+		totalGenerated += stats.GeneratedTokens
+		totalDuration += stats.Duration
 		fmt.Println(ansiReset)
 	}
 	if err := scanner.Err(); err != nil {
@@ -176,11 +162,23 @@ func chat(t *model.Transformer, tok *tokenizer.Tokenizer, samp *sampler.Sampler,
 	}
 }
 
-func toolCall(t *model.Transformer, tok *tokenizer.Tokenizer, samp *sampler.Sampler, prompt string, maxNew int) {
+func toolCall(client *smollm3.Client, prompt string, maxNew int, temperature float64, topP float64, seed int64) {
 	if strings.TrimSpace(prompt) == "" {
 		log.Fatal("toolcall mode requires -prompt")
 	}
-	toolRequest := chatReply(t, tok, samp, renderToolCallPrompt(prompt), maxNew, io.Discard)
+	toolRequest, _, err := client.Chat(context.Background(), []smollm3.Message{{Role: "user", Content: prompt}}, smollm3.ChatOptions{
+		GenerateOptions: smollm3.GenerateOptions{
+			MaxNewTokens: maxNew,
+			Temperature:  temperature,
+			TopP:         topP,
+			Seed:         seed,
+		},
+		SystemPrompt: toolCallSystemPrompt(),
+		Thinking:     false,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
 	calls, err := parseToolCalls(toolRequest)
 	if err != nil {
 		log.Fatal(err)
@@ -195,7 +193,27 @@ func toolCall(t *model.Transformer, tok *tokenizer.Tokenizer, samp *sampler.Samp
 	for _, result := range results {
 		fmt.Fprintf(os.Stderr, "tool: %s -> %s\n", result.Name, result.Result)
 	}
-	chatReply(t, tok, samp, renderToolResultPrompt(prompt, toolRequest, results), maxNew, os.Stdout)
+	_, _, err = client.Chat(context.Background(), []smollm3.Message{
+		{Role: "user", Content: prompt},
+		{Role: "assistant", Content: strings.TrimSpace(toolRequest)},
+		{Role: "user", Content: renderToolResponse(results)},
+	}, smollm3.ChatOptions{
+		GenerateOptions: smollm3.GenerateOptions{
+			MaxNewTokens: maxNew,
+			Temperature:  temperature,
+			TopP:         topP,
+			Seed:         seed,
+			TokenCallback: func(piece string) error {
+				fmt.Fprint(os.Stdout, piece)
+				return nil
+			},
+		},
+		SystemPrompt: toolResultSystemPrompt(),
+		Thinking:     false,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
 	fmt.Println()
 }
 
@@ -207,117 +225,8 @@ func printAssistantPrefix(w io.Writer) {
 	fmt.Fprint(w, ansiPrompt, "Assistant: ", ansiReset)
 }
 
-func chatReply(t *model.Transformer, tok *tokenizer.Tokenizer, samp *sampler.Sampler, rendered string, maxNew int, w io.Writer) string {
-	ids := tok.Encode(rendered, false, false)
-	pos := 0
-	// Chat mode differs from generate mode only in prompt rendering.
-	logits, pos := forwardTokens(t, ids, pos)
-	out, _, _, _ := generateAssistant(t, tok, samp, logits, pos, maxNew, w)
-	return out
-}
-
-func generateAssistant(t *model.Transformer, tok *tokenizer.Tokenizer, samp *sampler.Sampler, logits []float32, pos int, maxNew int, w io.Writer) (string, int, int, time.Duration) {
-	var out strings.Builder
-	generated := 0
-	start := time.Now()
-	for generated < maxNew && pos < t.Config.SeqLen {
-		next := samp.Sample(logits)
-		if next == tok.EOS() {
-			pos = closeAssistantTurn(t, tok, pos)
-			break
-		}
-		piece := tok.Decode(next)
-		fmt.Fprint(w, piece)
-		out.WriteString(piece)
-		logits = t.Forward(next, pos)
-		pos++
-		generated++
-	}
-	if generated == maxNew && pos < t.Config.SeqLen {
-		pos = closeAssistantTurn(t, tok, pos)
-	}
-	duration := time.Duration(0)
-	if generated > 0 {
-		duration = time.Since(start)
-	}
-	return out.String(), pos, generated, duration
-}
-
-func closeAssistantTurn(t *model.Transformer, tok *tokenizer.Tokenizer, pos int) int {
-	if pos < t.Config.SeqLen {
-		t.Forward(tok.EOS(), pos)
-		pos++
-	}
-	ids := tok.Encode("\n", false, false)
-	for i := 0; i < len(ids) && pos < t.Config.SeqLen; i++ {
-		t.Forward(ids[i], pos)
-		pos++
-	}
-	return pos
-}
-
-func forwardTokens(t *model.Transformer, ids []int, pos int) ([]float32, int) {
-	if len(ids) == 0 || pos >= t.Config.SeqLen {
-		return nil, pos
-	}
-	end := min(len(ids), t.Config.SeqLen-pos)
-	return t.Prefill(ids[:end], pos), pos + end
-}
-
-func renderChatPrompt(messages []chatMessage, systemPrompt string, thinking bool) string {
-	var b strings.Builder
-	b.WriteString(renderSystemPrompt(systemPrompt, thinking))
-	for _, msg := range messages {
-		b.WriteString("<|im_start|>")
-		b.WriteString(msg.role)
-		b.WriteByte('\n')
-		if msg.role == "assistant" && !thinking {
-			b.WriteString("<think>\n\n</think>\n")
-		}
-		b.WriteString(msg.content)
-		b.WriteString("<|im_end|>\n")
-	}
-	b.WriteString("<|im_start|>assistant\n")
-	if !thinking {
-		b.WriteString("<think>\n\n</think>\n")
-	}
-	return b.String()
-}
-
-func renderSystemPrompt(systemPrompt string, thinking bool) string {
-	if strings.Contains(systemPrompt, "/no_think") {
-		thinking = false
-		systemPrompt = strings.ReplaceAll(systemPrompt, "/no_think", "")
-	}
-	if strings.Contains(systemPrompt, "/think") {
-		thinking = true
-		systemPrompt = strings.ReplaceAll(systemPrompt, "/think", "")
-	}
-	systemPrompt = strings.TrimSpace(systemPrompt)
-	if systemPrompt == "" {
-		if thinking {
-			systemPrompt = "You are a helpful AI assistant named SmolLM, trained by Hugging Face. Structure your response into two sections: <think> for reasoning and a concise final solution after </think>."
-		} else {
-			systemPrompt = "You are a helpful AI assistant named SmolLM, trained by Hugging Face."
-		}
-	}
-	reasoningMode := "/no_think"
-	if thinking {
-		reasoningMode = "/think"
-	}
-	return "<|im_start|>system\n## Metadata\n\nReasoning Mode: " + reasoningMode + "\n\n## Custom Instructions\n\n" + systemPrompt + "\n<|im_end|>\n"
-}
-
-func renderUserTurn(userPrompt string, thinking bool) string {
-	prompt := "<|im_start|>user\n" + userPrompt + "<|im_end|>\n<|im_start|>assistant\n"
-	if !thinking {
-		prompt += "<think>\n\n</think>\n"
-	}
-	return prompt
-}
-
-func renderToolCallPrompt(userPrompt string) string {
-	systemPrompt := `You are a helpful AI assistant named SmolLM, trained by Hugging Face.
+func toolCallSystemPrompt() string {
+	return `You are a helpful AI assistant named SmolLM, trained by Hugging Face.
 
 ### Tools
 
@@ -332,20 +241,13 @@ For each function call, return a json object with function name and arguments wi
 <tool_call>
 {"name": <function-name>, "arguments": <args-json-object>}
 </tool_call>`
-	return renderChatPrompt([]chatMessage{{role: "user", content: userPrompt}}, systemPrompt, false)
 }
 
-func renderToolResultPrompt(userPrompt string, toolRequest string, results []toolResultItem) string {
-	systemPrompt := `You are a helpful AI assistant.
+func toolResultSystemPrompt() string {
+	return `You are a helpful AI assistant.
 Use the tool response to answer the user's request.
 Write only the final answer in plain text.
 Do not call tools again.`
-	messages := []chatMessage{
-		{role: "user", content: userPrompt},
-		{role: "assistant", content: strings.TrimSpace(toolRequest)},
-		{role: "user", content: renderToolResponse(results)},
-	}
-	return renderChatPrompt(messages, systemPrompt, false)
 }
 
 func renderToolResponse(results []toolResultItem) string {
