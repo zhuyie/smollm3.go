@@ -143,7 +143,7 @@ import (
 	"fmt"
 	"log"
 
-	smollm3 "smollm3go"
+	"smollm3go"
 )
 
 func main() {

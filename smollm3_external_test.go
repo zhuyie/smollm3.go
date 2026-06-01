@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	smollm3 "smollm3go"
+	"smollm3go"
 )
 
 func TestExternalPackageCanUsePublicAPI(t *testing.T) {

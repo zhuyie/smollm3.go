@@ -3,49 +3,34 @@ package main
 import (
 	"os"
 	"path/filepath"
-	"smollm3go/internal/model"
-	"smollm3go/internal/tokenizer"
 	"strings"
 	"testing"
+
+	"smollm3go"
 )
 
-func TestRenderChatPromptIncludesHistory(t *testing.T) {
-	messages := []chatMessage{
-		{role: "user", content: "hello"},
-		{role: "assistant", content: "hi"},
-		{role: "user", content: "again"},
-	}
-	got := renderChatPrompt(messages, "system", true)
-	want := "<|im_start|>system\n## Metadata\n\nReasoning Mode: /think\n\n## Custom Instructions\n\nsystem\n<|im_end|>\n" +
-		"<|im_start|>user\nhello<|im_end|>\n" +
-		"<|im_start|>assistant\nhi<|im_end|>\n" +
-		"<|im_start|>user\nagain<|im_end|>\n" +
-		"<|im_start|>assistant\n"
-	if got != want {
-		t.Fatalf("renderChatPrompt() = %q, want %q", got, want)
-	}
-}
-
-func TestRenderChatPromptUsesDefaultSystemPrompt(t *testing.T) {
-	got := renderChatPrompt(nil, "", true)
-	if !strings.Contains(got, "You are a helpful AI assistant named SmolLM") {
-		t.Fatalf("renderChatPrompt() = %q, want default system prompt", got)
-	}
-}
-
-func TestRenderToolResultPromptIncludesToolExchange(t *testing.T) {
-	toolRequest := `<tool_call>{"name":"get_product_price","arguments":{"product":"notebook"}}</tool_call>`
-	got := renderToolResultPrompt("price?", toolRequest, []toolResultItem{{Name: "get_product_price", Result: "12"}})
-
+func TestToolPrompts(t *testing.T) {
+	got := toolCallSystemPrompt()
 	for _, want := range []string{
-		"<|im_start|>user\nprice?<|im_end|>",
-		"<|im_start|>assistant\n<think>\n\n</think>\n" + toolRequest + "<|im_end|>",
-		"<tool_response>\n{\"name\":\"get_product_price\",\"result\":\"12\"}\n</tool_response>",
-		"<|im_start|>assistant\n<think>\n\n</think>\n",
+		"get_product_price",
+		"<tools>",
+		"<tool_call>",
 	} {
 		if !strings.Contains(got, want) {
-			t.Fatalf("renderToolResultPrompt() missing %q in %q", want, got)
+			t.Fatalf("toolCallSystemPrompt() missing %q in %q", want, got)
 		}
+	}
+
+	if got := toolResultSystemPrompt(); !strings.Contains(got, "Do not call tools again.") {
+		t.Fatalf("toolResultSystemPrompt() = %q, want final-answer instruction", got)
+	}
+}
+
+func TestRenderToolResponse(t *testing.T) {
+	got := renderToolResponse([]toolResultItem{{Name: "get_product_price", Result: "12"}})
+	want := "<tool_response>\n{\"name\":\"get_product_price\",\"result\":\"12\"}\n</tool_response>"
+	if got != want {
+		t.Fatalf("renderToolResponse() = %q, want %q", got, want)
 	}
 }
 
@@ -144,11 +129,7 @@ func BenchmarkInitialize(b *testing.B) {
 	modelPath, tokenizerPath := benchPaths(b)
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		t, err := model.Load(modelPath)
-		if err != nil {
-			b.Fatal(err)
-		}
-		if _, err := tokenizer.Load(tokenizerPath, t.Config.VocabSize); err != nil {
+		if _, err := smollm3.Load(smollm3.Config{ModelPath: modelPath, TokenizerPath: tokenizerPath}); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -164,17 +145,13 @@ func BenchmarkEncodeLongPrompt(b *testing.B) {
 
 func benchmarkEncode(b *testing.B, prompt string) {
 	modelPath, tokenizerPath := benchPaths(b)
-	t, err := model.Load(modelPath)
-	if err != nil {
-		b.Fatal(err)
-	}
-	tok, err := tokenizer.Load(tokenizerPath, t.Config.VocabSize)
+	client, err := smollm3.Load(smollm3.Config{ModelPath: modelPath, TokenizerPath: tokenizerPath})
 	if err != nil {
 		b.Fatal(err)
 	}
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		tok.Encode(prompt, false, false)
+		client.Encode(prompt, false, false)
 	}
 }
