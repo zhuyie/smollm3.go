@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"smollm3go"
+	"github.com/zhuyie/smollm3.go"
 )
 
 func TestExternalPackageCanUsePublicAPI(t *testing.T) {

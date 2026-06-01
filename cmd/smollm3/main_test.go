@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"smollm3go"
+	"github.com/zhuyie/smollm3.go"
 )
 
 func TestToolPrompts(t *testing.T) {

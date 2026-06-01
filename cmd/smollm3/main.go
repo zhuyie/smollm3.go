@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"smollm3go"
+	"github.com/zhuyie/smollm3.go"
 )
 
 type toolCallItem struct {

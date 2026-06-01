@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"smollm3go/internal/model"
-	"smollm3go/internal/sampler"
-	"smollm3go/internal/tokenizer"
+	"github.com/zhuyie/smollm3.go/internal/model"
+	"github.com/zhuyie/smollm3.go/internal/sampler"
+	"github.com/zhuyie/smollm3.go/internal/tokenizer"
 )
 
 const (
