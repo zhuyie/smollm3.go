@@ -97,7 +97,7 @@ func generate(client *smollm3.Client, prompt string, maxNew int, temperature flo
 	}
 	fmt.Println()
 	fmt.Println()
-	fmt.Fprintf(os.Stderr, "achieved tok/s: %.6f\n", stats.TokensPerSecond())
+	printGenerationStats(os.Stderr, stats)
 }
 
 func chat(client *smollm3.Client, userPrompt string, systemPrompt string, thinking bool, maxNew int, temperature float64, topP float64, seed int64) {
@@ -117,10 +117,13 @@ func chat(client *smollm3.Client, userPrompt string, systemPrompt string, thinki
 	}
 	if userPrompt != "" {
 		printAssistantPrefix(os.Stdout)
-		if _, _, err := client.Chat(context.Background(), []smollm3.Message{{Role: "user", Content: userPrompt}}, opts); err != nil {
+		_, stats, err := client.Chat(context.Background(), []smollm3.Message{{Role: "user", Content: userPrompt}}, opts)
+		if err != nil {
 			log.Fatal(err)
 		}
 		fmt.Println(ansiReset)
+		fmt.Fprintln(os.Stderr)
+		printGenerationStats(os.Stderr, stats)
 		return
 	}
 
@@ -154,7 +157,11 @@ func chat(client *smollm3.Client, userPrompt string, systemPrompt string, thinki
 	if err := scanner.Err(); err != nil {
 		log.Fatal(err)
 	}
-	fmt.Fprintf(os.Stderr, "achieved tok/s: %.6f\n", totalStats.TokensPerSecond())
+	printGenerationStats(os.Stderr, totalStats)
+}
+
+func printGenerationStats(w io.Writer, stats smollm3.GenerationStats) {
+	fmt.Fprintf(w, "achieved tok/s: %.6f\n", stats.TokensPerSecond())
 }
 
 func toolCall(client *smollm3.Client, prompt string, maxNew int, temperature float64, topP float64, seed int64) {
