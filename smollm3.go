@@ -134,6 +134,9 @@ func (c *Client) Generate(ctx context.Context, prompt string, opts GenerateOptio
 	if len(ids) == 0 {
 		ids = append(ids, c.tokenizer.EOS())
 	}
+	if err := validateContextWindow(len(ids), 0, opts.MaxNewTokens, c.transformer.Config.SeqLen); err != nil {
+		return "", GenerationStats{PromptTokens: len(ids)}, err
+	}
 	logits, pos := c.forwardTokens(ids, 0)
 	out, pos, generated, duration, err := c.generateFromLogits(ctx, sampler.New(float32(opts.Temperature), float32(opts.TopP), opts.Seed), logits, pos, opts.MaxNewTokens, opts.TokenCallback, false)
 	_ = pos
@@ -151,6 +154,9 @@ func (c *Client) Chat(ctx context.Context, messages []Message, opts ChatOptions)
 	opts.GenerateOptions = normalizeGenerateOptions(opts.GenerateOptions)
 	rendered := RenderChatPrompt(messages, opts.SystemPrompt, opts.Thinking)
 	ids := c.tokenizer.Encode(rendered, false, false)
+	if err := validateContextWindow(len(ids), 0, opts.MaxNewTokens, c.transformer.Config.SeqLen); err != nil {
+		return "", GenerationStats{PromptTokens: len(ids)}, err
+	}
 	logits, pos := c.forwardTokens(ids, 0)
 	out, pos, generated, duration, err := c.generateFromLogits(ctx, sampler.New(float32(opts.Temperature), float32(opts.TopP), opts.Seed), logits, pos, opts.MaxNewTokens, opts.TokenCallback, true)
 	_ = pos
@@ -190,9 +196,12 @@ func (s *ChatSession) Reply(ctx context.Context, userPrompt string) (string, Gen
 	prompt := renderUserTurn(userPrompt, s.opts.Thinking)
 	if !s.ready {
 		prompt = renderSystemPrompt(s.opts.SystemPrompt, s.opts.Thinking) + prompt
-		s.ready = true
 	}
 	ids := c.tokenizer.Encode(prompt, false, false)
+	if err := validateContextWindow(len(ids), s.pos, s.opts.MaxNewTokens, c.transformer.Config.SeqLen); err != nil {
+		return "", GenerationStats{PromptTokens: len(ids)}, err
+	}
+	s.ready = true
 	logits, pos := c.forwardTokens(ids, s.pos)
 	out, pos, generated, duration, err := c.generateFromLogits(ctx, s.sampler, logits, pos, s.opts.MaxNewTokens, s.opts.TokenCallback, true)
 	s.pos = pos
@@ -231,6 +240,20 @@ func normalizeGenerateOptions(opts GenerateOptions) GenerateOptions {
 		opts.TopP = defaultTopP
 	}
 	return opts
+}
+
+func validateContextWindow(promptTokens int, existingTokens int, maxNewTokens int, seqLen int) error {
+	if existingTokens < 0 {
+		existingTokens = 0
+	}
+	if promptTokens > seqLen-existingTokens {
+		return fmt.Errorf("prompt uses %d tokens with %d existing context tokens, exceeding context length %d", promptTokens, existingTokens, seqLen)
+	}
+	remaining := seqLen - existingTokens - promptTokens
+	if maxNewTokens > remaining {
+		return fmt.Errorf("max new tokens %d exceeds remaining context %d tokens", maxNewTokens, remaining)
+	}
+	return nil
 }
 
 func (c *Client) forwardTokens(ids []int, pos int) ([]float32, int) {
