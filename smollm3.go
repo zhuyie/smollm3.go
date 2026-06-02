@@ -20,8 +20,8 @@ import (
 
 const (
 	defaultMaxNewTokens   = 1024
-	defaultTemperature    = 1.0
-	defaultTopP           = 0.9
+	defaultTemperature    = 0.6
+	defaultTopP           = 0.95
 	defaultSystemPrompt   = "You are a helpful AI assistant named SmolLM, trained by Hugging Face."
 	defaultThinkingPrompt = defaultSystemPrompt + " Your role as an assistant involves thoroughly exploring questions through a systematic thinking process before providing the final precise and accurate solutions. " +
 		"This requires engaging in a comprehensive cycle of analysis, summarizing, exploration, reassessment, reflection, backtracking, and iteration to develop well-considered thinking process. " +

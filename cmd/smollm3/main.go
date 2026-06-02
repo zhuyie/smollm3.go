@@ -32,6 +32,9 @@ const (
 	ansiReset     = "\x1b[0m"
 	ansiPrompt    = "\x1b[33m"
 	ansiUserInput = "\x1b[1m\x1b[32m"
+
+	defaultTemperature = 0.6
+	defaultTopP        = 0.95
 )
 
 func main() {
@@ -42,8 +45,8 @@ func main() {
 	systemPrompt := flag.String("system", "", "optional system prompt for chat")
 	thinking := flag.Bool("think", true, "enable SmolLM3 extended thinking chat template")
 	maxNew := flag.Int("n", 1024, "maximum new tokens")
-	temperature := flag.Float64("temp", 1.0, "sampling temperature, 0 for greedy")
-	topP := flag.Float64("top-p", 0.9, "top-p nucleus sampling")
+	temperature := flag.Float64("temp", defaultTemperature, "sampling temperature, 0 for greedy")
+	topP := flag.Float64("top-p", defaultTopP, "top-p nucleus sampling")
 	seed := flag.Int64("seed", time.Now().UnixNano(), "random seed")
 	flag.Parse()
 
@@ -55,10 +58,10 @@ func main() {
 		*maxNew = 1024
 	}
 	if *temperature < 0 || math.IsNaN(*temperature) || math.IsInf(*temperature, 0) {
-		*temperature = 1.0
+		*temperature = defaultTemperature
 	}
 	if *topP < 0 || *topP > 1 || math.IsNaN(*topP) || math.IsInf(*topP, 0) {
-		*topP = 0.9
+		*topP = defaultTopP
 	}
 
 	client, err := smollm3.Load(smollm3.Config{
