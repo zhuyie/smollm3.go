@@ -96,9 +96,8 @@ func generate(client *smollm3.Client, prompt string, maxNew int, temperature flo
 		log.Fatal(err)
 	}
 	fmt.Println()
-	if stats.GeneratedTokens > 1 && stats.Duration > 0 {
-		fmt.Fprintf(os.Stderr, "achieved tok/s: %.6f\n", stats.TokensPerSecond())
-	}
+	fmt.Println()
+	fmt.Fprintf(os.Stderr, "achieved tok/s: %.6f\n", stats.TokensPerSecond())
 }
 
 func chat(client *smollm3.Client, userPrompt string, systemPrompt string, thinking bool, maxNew int, temperature float64, topP float64, seed int64) {
@@ -126,8 +125,7 @@ func chat(client *smollm3.Client, userPrompt string, systemPrompt string, thinki
 	}
 
 	session := client.NewChatSession(opts)
-	totalGenerated := 0
-	totalDuration := time.Duration(0)
+	totalStats := smollm3.GenerationStats{}
 	scanner := bufio.NewScanner(os.Stdin)
 	for {
 		printUserPrefix(os.Stdout)
@@ -149,17 +147,14 @@ func chat(client *smollm3.Client, userPrompt string, systemPrompt string, thinki
 		if err != nil {
 			log.Fatal(err)
 		}
-		totalGenerated += stats.GeneratedTokens
-		totalDuration += stats.Duration
+		totalStats.GeneratedTokens += stats.GeneratedTokens
+		totalStats.Duration += stats.Duration
 		fmt.Println(ansiReset)
 	}
 	if err := scanner.Err(); err != nil {
 		log.Fatal(err)
 	}
-	if totalGenerated > 1 && totalDuration > 0 {
-		tokPerSec := float64(totalGenerated) / totalDuration.Seconds()
-		fmt.Fprintf(os.Stderr, "achieved tok/s: %.6f\n", tokPerSec)
-	}
+	fmt.Fprintf(os.Stderr, "achieved tok/s: %.6f\n", totalStats.TokensPerSecond())
 }
 
 func toolCall(client *smollm3.Client, prompt string, maxNew int, temperature float64, topP float64, seed int64) {
