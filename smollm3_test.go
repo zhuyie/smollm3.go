@@ -51,7 +51,32 @@ func TestRenderChatPromptUsesDefaultSystemPrompt(t *testing.T) {
 	for _, want := range []string{
 		"You are a helpful AI assistant named SmolLM",
 		"Reasoning Mode: /think",
-		"Structure your response into two sections",
+		"Please structure your response into two main sections: Thought and Solution",
+		"<think> Thought section </think> Solution section",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("RenderChatPrompt() missing %q in %q", want, got)
+		}
+	}
+}
+
+func TestRenderChatPromptDoesNotAddDefaultThinkingPromptToCustomSystemPrompt(t *testing.T) {
+	got := RenderChatPrompt(nil, "custom /think", false)
+	for _, want := range []string{
+		"Reasoning Mode: /think",
+		"## Custom Instructions\n\ncustom\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("RenderChatPrompt() missing %q in %q", want, got)
+		}
+	}
+}
+
+func TestRenderChatPromptNoThinkFlagTakesPrecedence(t *testing.T) {
+	got := RenderChatPrompt(nil, "/think /no_think", true)
+	for _, want := range []string{
+		"Reasoning Mode: /no_think",
+		defaultSystemPrompt,
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("RenderChatPrompt() missing %q in %q", want, got)

@@ -19,10 +19,14 @@ import (
 )
 
 const (
-	defaultMaxNewTokens = 1024
-	defaultTemperature  = 1.0
-	defaultTopP         = 0.9
-	defaultSystemPrompt = "You are a helpful AI assistant named SmolLM, trained by Hugging Face."
+	defaultMaxNewTokens   = 1024
+	defaultTemperature    = 1.0
+	defaultTopP           = 0.9
+	defaultSystemPrompt   = "You are a helpful AI assistant named SmolLM, trained by Hugging Face."
+	defaultThinkingPrompt = defaultSystemPrompt + " Your role as an assistant involves thoroughly exploring questions through a systematic thinking process before providing the final precise and accurate solutions. " +
+		"This requires engaging in a comprehensive cycle of analysis, summarizing, exploration, reassessment, reflection, backtracking, and iteration to develop well-considered thinking process. " +
+		"Please structure your response into two main sections: Thought and Solution using the specified format: <think> Thought section </think> Solution section. " +
+		"In the Thought section, detail your reasoning process in steps. In the Solution section, systematically present the final solution that you deem correct."
 )
 
 // Config selects the model and tokenizer files to load.
@@ -295,17 +299,16 @@ func (c *Client) closeAssistantTurn(pos int) int {
 func renderSystemPrompt(systemPrompt string, thinking bool) string {
 	if strings.Contains(systemPrompt, "/no_think") {
 		thinking = false
-		systemPrompt = strings.ReplaceAll(systemPrompt, "/no_think", "")
-	}
-	if strings.Contains(systemPrompt, "/think") {
+	} else if strings.Contains(systemPrompt, "/think") {
 		thinking = true
-		systemPrompt = strings.ReplaceAll(systemPrompt, "/think", "")
 	}
+	systemPrompt = strings.ReplaceAll(systemPrompt, "/no_think", "")
+	systemPrompt = strings.ReplaceAll(systemPrompt, "/think", "")
 	systemPrompt = strings.TrimSpace(systemPrompt)
 	if systemPrompt == "" {
 		systemPrompt = defaultSystemPrompt
 		if thinking {
-			systemPrompt += " Structure your response into two sections: <think> for reasoning and a concise final solution after </think>."
+			systemPrompt = defaultThinkingPrompt
 		}
 	}
 	reasoningMode := "/no_think"
