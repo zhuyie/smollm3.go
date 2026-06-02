@@ -97,6 +97,57 @@ func TestNormalizeGenerateOptions(t *testing.T) {
 	}
 }
 
+func TestValidateContextWindow(t *testing.T) {
+	if err := validateContextWindow(3, 2, 5, 10); err != nil {
+		t.Fatalf("validateContextWindow() returned error for exact fit: %v", err)
+	}
+
+	tests := []struct {
+		name           string
+		promptTokens   int
+		existingTokens int
+		maxNewTokens   int
+		seqLen         int
+		want           string
+	}{
+		{
+			name:           "prompt exceeds context",
+			promptTokens:   11,
+			existingTokens: 0,
+			maxNewTokens:   1,
+			seqLen:         10,
+			want:           "prompt uses 11 tokens with 0 existing context tokens, exceeding context length 10",
+		},
+		{
+			name:           "max new exceeds remaining context",
+			promptTokens:   4,
+			existingTokens: 0,
+			maxNewTokens:   7,
+			seqLen:         10,
+			want:           "max new tokens 7 exceeds remaining context 6 tokens",
+		},
+		{
+			name:           "existing context reduces remaining context",
+			promptTokens:   3,
+			existingTokens: 5,
+			maxNewTokens:   3,
+			seqLen:         10,
+			want:           "max new tokens 3 exceeds remaining context 2 tokens",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateContextWindow(tt.promptTokens, tt.existingTokens, tt.maxNewTokens, tt.seqLen)
+			if err == nil {
+				t.Fatal("validateContextWindow() returned nil error")
+			}
+			if err.Error() != tt.want {
+				t.Fatalf("validateContextWindow() error = %q, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestNilClientGenerateAndChatReturnErrors(t *testing.T) {
 	var c *Client
 	if _, _, err := c.Generate(context.Background(), "hello", GenerateOptions{}); err == nil {
