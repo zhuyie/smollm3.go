@@ -57,6 +57,8 @@ When touching CLI behavior, run CLI tests at minimum:
 go test ./cmd/smollm3
 ```
 
+Do not add tests mechanically for every change. Let test coverage follow risk and value: correctness-sensitive parsing, tokenizer behavior, model behavior, checkpoint formats, and CLI contract changes should be tested, but small output formatting tweaks or updates to previously hard-coded strings often do not need dedicated unit tests when the added test would mostly restate the implementation.
+
 ## Commit Log Style
 
 Use concise conventional-style commit messages:
