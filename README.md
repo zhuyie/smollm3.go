@@ -77,10 +77,10 @@ Reference results on Windows/amd64 with an AMD Ryzen 9 9950X:
 
 | Benchmark | FP32 | Int8 |
 | --- | ---: | ---: |
-| Prefill 128 tokens | 61.39 tok/s | 98.58 tok/s |
-| Prefill 512 tokens | 52.29 tok/s | 81.14 tok/s |
-| Decode at 128-token context | 3.432 tok/s | 11.67 tok/s |
-| Decode at 512-token context | 3.345 tok/s | 11.21 tok/s |
+| Prefill 128 tokens | 62.07 tok/s | 99.45 tok/s |
+| Prefill 512 tokens | 52.72 tok/s | 84.39 tok/s |
+| Decode at 128-token context | 3.418 tok/s | 11.69 tok/s |
+| Decode at 512-token context | 3.356 tok/s | 11.29 tok/s |
 
 ## Run
 

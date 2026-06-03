@@ -13,6 +13,7 @@ func dotF32Batch4AMD64(x0 []float32, x1 []float32, x2 []float32, x3 []float32, w
 func dotInt8AMD64(x []int8, w []int8) int32
 func dotInt8Batch4AMD64(x0 []int8, x1 []int8, x2 []int8, x3 []int8, w []int8) (int32, int32, int32, int32)
 func addScaledF32AMD64(dst []float32, src []float32, scale float32)
+func attentionValueAMD64(out []float32, att []float32, values []float32, steps int, stride int, offset int)
 
 func dotF32(a []float32, b []float32) float32 {
 	n := min(len(a), len(b))
@@ -108,6 +109,11 @@ func addScaledF32(dst []float32, src []float32, scale float32) {
 }
 
 func attentionValue(out []float32, att []float32, values []float32, steps int, stride int, offset int) {
+	if useAVX2 && len(out) >= simdMinN && len(out)&7 == 0 {
+		clear(out)
+		attentionValueAMD64(out, att[:steps], values, steps, stride, offset)
+		return
+	}
 	clear(out)
 	for ts := 0; ts < steps; ts++ {
 		v := values[ts*stride+offset : ts*stride+offset+len(out)]

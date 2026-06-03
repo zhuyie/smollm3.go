@@ -297,3 +297,68 @@ addscaled_loop8:
 addscaled_done:
 	VZEROUPPER
 	RET
+
+// func attentionValueAMD64(out, att, values []float32, steps, stride, offset int)
+// Accumulates out[i] += att[t] * values[t*stride+offset+i] for t in [0, steps).
+// The Go wrapper clears out first and only calls this for out lengths that are
+// multiples of 8.
+TEXT ·attentionValueAMD64(SB), NOSPLIT, $0-104
+	MOVQ out_base+0(FP), AX
+	MOVQ out_len+8(FP), R11
+	MOVQ att_base+24(FP), BX
+	MOVQ values_base+48(FP), DX
+	MOVQ steps+72(FP), SI
+	MOVQ stride+80(FP), DI
+	MOVQ offset+88(FP), R8
+
+	SHLQ $2, DI // stride in bytes
+	SHLQ $2, R8 // offset in bytes
+	ADDQ R8, DX // current value row
+	TESTQ SI, SI
+	JZ attvalue_done
+
+attvalue_outer:
+	VBROADCASTSS (BX), Y0
+	ADDQ $4, BX
+	MOVQ AX, R9
+	MOVQ DX, R10
+
+	MOVQ R11, CX
+	SHRQ $4, CX
+	JZ attvalue_rem8
+
+attvalue_loop16:
+	VMOVUPS (R9), Y1
+	VMOVUPS 32(R9), Y2
+	VMOVUPS (R10), Y3
+	VMOVUPS 32(R10), Y4
+	VMULPS Y0, Y3, Y3
+	VMULPS Y0, Y4, Y4
+	VADDPS Y3, Y1, Y1
+	VADDPS Y4, Y2, Y2
+	VMOVUPS Y1, (R9)
+	VMOVUPS Y2, 32(R9)
+	ADDQ $64, R9
+	ADDQ $64, R10
+	DECQ CX
+	JNZ attvalue_loop16
+
+attvalue_rem8:
+	MOVQ R11, CX
+	ANDQ $15, CX
+	CMPQ CX, $8
+	JB attvalue_next
+	VMOVUPS (R9), Y1
+	VMOVUPS (R10), Y3
+	VMULPS Y0, Y3, Y3
+	VADDPS Y3, Y1, Y1
+	VMOVUPS Y1, (R9)
+
+attvalue_next:
+	ADDQ DI, DX
+	DECQ SI
+	JNZ attvalue_outer
+
+attvalue_done:
+	VZEROUPPER
+	RET
