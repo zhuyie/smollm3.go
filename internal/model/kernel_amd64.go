@@ -10,6 +10,8 @@ var useAVX2 = hasAVX2AMD64()
 func hasAVX2AMD64() bool
 func dotF32AMD64(a []float32, b []float32) float32
 func dotF32Batch4AMD64(x0 []float32, x1 []float32, x2 []float32, x3 []float32, w []float32) (float32, float32, float32, float32)
+func dotInt8AMD64(x []int8, w []int8) int32
+func dotInt8Batch4AMD64(x0 []int8, x1 []int8, x2 []int8, x3 []int8, w []int8) (int32, int32, int32, int32)
 func addScaledF32AMD64(dst []float32, src []float32, scale float32)
 
 func dotF32(a []float32, b []float32) float32 {
@@ -44,7 +46,37 @@ func dotF32Batch4(x0 []float32, x1 []float32, x2 []float32, x3 []float32, w []fl
 
 func dotInt8(x []int8, w []int8) int32 {
 	n := min(len(x), len(w))
+	vecN := n &^ 31
+	if useAVX2 && vecN >= simdMinN {
+		val := dotInt8AMD64(x[:vecN], w[:vecN])
+		if vecN < n {
+			val += dotInt8Scalar(x[vecN:n], w[vecN:n])
+		}
+		return val
+	}
 	return dotInt8Scalar(x[:n], w[:n])
+}
+
+func dotInt8Batch4(x0 []int8, x1 []int8, x2 []int8, x3 []int8, w []int8) (int32, int32, int32, int32) {
+	n := min(len(x0), len(x1), len(x2), len(x3), len(w))
+	vecN := n &^ 31
+	if useAVX2 && vecN >= simdMinN {
+		v0, v1, v2, v3 := dotInt8Batch4AMD64(x0[:vecN], x1[:vecN], x2[:vecN], x3[:vecN], w[:vecN])
+		if vecN < n {
+			r0, r1, r2, r3 := dotInt8Batch4Scalar(x0[vecN:n], x1[vecN:n], x2[vecN:n], x3[vecN:n], w[vecN:n])
+			v0 += r0
+			v1 += r1
+			v2 += r2
+			v3 += r3
+		}
+		return v0, v1, v2, v3
+	}
+	return dotInt8Batch4Scalar(x0[:n], x1[:n], x2[:n], x3[:n], w[:n])
+}
+
+func useDotInt8Batch4(n int) bool {
+	vecN := n &^ 31
+	return useAVX2 && vecN >= simdMinN
 }
 
 func matmulF32(out []float32, x []float32, w []float32, n int, d int) {
@@ -76,7 +108,11 @@ func addScaledF32(dst []float32, src []float32, scale float32) {
 }
 
 func attentionValue(out []float32, att []float32, values []float32, steps int, stride int, offset int) {
-	attentionValueScalar(out, att, values, steps, stride, offset)
+	clear(out)
+	for ts := 0; ts < steps; ts++ {
+		v := values[ts*stride+offset : ts*stride+offset+len(out)]
+		addScaledF32(out, v, att[ts])
+	}
 }
 
 func attentionScores(out []float32, q []float32, keys []float32, steps int, stride int, offset int, scale float32) {

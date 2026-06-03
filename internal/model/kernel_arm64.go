@@ -35,6 +35,15 @@ func dotInt8(x []int8, w []int8) int32 {
 	return dotInt8Scalar(x[:n], w[:n])
 }
 
+func dotInt8Batch4(x0 []int8, x1 []int8, x2 []int8, x3 []int8, w []int8) (int32, int32, int32, int32) {
+	n := min(len(x0), len(x1), len(x2), len(x3), len(w))
+	return dotInt8(x0[:n], w[:n]), dotInt8(x1[:n], w[:n]), dotInt8(x2[:n], w[:n]), dotInt8(x3[:n], w[:n])
+}
+
+func useDotInt8Batch4(int) bool {
+	return false
+}
+
 func matmulF32(out []float32, x []float32, w []float32, n int, d int) {
 	if n >= simdMinN && n&3 == 0 {
 		out = out[:d]
