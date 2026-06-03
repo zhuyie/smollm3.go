@@ -142,6 +142,45 @@ batch4_reduce:
 	VZEROUPPER
 	RET
 
+// func dotInt8AMD64(x []int8, w []int8) int32
+// Computes sum(int32(x[i]) * int32(w[i])). The Go wrapper calls this for
+// lengths that are multiples of 32.
+TEXT ·dotInt8AMD64(SB), NOSPLIT, $0-52
+	MOVQ x_base+0(FP), AX
+	MOVQ x_len+8(FP), CX
+	MOVQ w_base+24(FP), BX
+
+	VPXOR Y0, Y0, Y0
+	VPXOR Y1, Y1, Y1
+	SHRQ $5, CX
+	JZ dot_int8_reduce
+
+dot_int8_loop32:
+	VPMOVSXBW (AX), Y2
+	VPMOVSXBW 16(AX), Y3
+	VPMOVSXBW (BX), Y4
+	VPMOVSXBW 16(BX), Y5
+	VPMADDWD Y4, Y2, Y2
+	VPMADDWD Y5, Y3, Y3
+	VPADDD Y2, Y0, Y0
+	VPADDD Y3, Y1, Y1
+	ADDQ $32, AX
+	ADDQ $32, BX
+	DECQ CX
+	JNZ dot_int8_loop32
+
+dot_int8_reduce:
+	VPADDD Y1, Y0, Y0
+	VEXTRACTI128 $1, Y0, X1
+	VPADDD X1, X0, X0
+	VPSHUFD $0x4e, X0, X1
+	VPADDD X1, X0, X0
+	VPSHUFD $0xb1, X0, X1
+	VPADDD X1, X0, X0
+	MOVL X0, ret+48(FP)
+	VZEROUPPER
+	RET
+
 // func addScaledF32AMD64(dst, src []float32, scale float32)
 // The Go wrapper calls this with a length that is a multiple of 8.
 TEXT ·addScaledF32AMD64(SB), NOSPLIT, $0-52

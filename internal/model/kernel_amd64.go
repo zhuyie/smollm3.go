@@ -10,6 +10,7 @@ var useAVX2 = hasAVX2AMD64()
 func hasAVX2AMD64() bool
 func dotF32AMD64(a []float32, b []float32) float32
 func dotF32Batch4AMD64(x0 []float32, x1 []float32, x2 []float32, x3 []float32, w []float32) (float32, float32, float32, float32)
+func dotInt8AMD64(x []int8, w []int8) int32
 func addScaledF32AMD64(dst []float32, src []float32, scale float32)
 
 func dotF32(a []float32, b []float32) float32 {
@@ -44,6 +45,14 @@ func dotF32Batch4(x0 []float32, x1 []float32, x2 []float32, x3 []float32, w []fl
 
 func dotInt8(x []int8, w []int8) int32 {
 	n := min(len(x), len(w))
+	vecN := n &^ 31
+	if useAVX2 && vecN >= simdMinN {
+		val := dotInt8AMD64(x[:vecN], w[:vecN])
+		if vecN < n {
+			val += dotInt8Scalar(x[vecN:n], w[vecN:n])
+		}
+		return val
+	}
 	return dotInt8Scalar(x[:n], w[:n])
 }
 
