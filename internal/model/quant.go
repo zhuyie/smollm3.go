@@ -127,16 +127,18 @@ func matmulBatchInt8Rows(out []float32, x []int8, xScale []float32, q *Quantized
 		weights := q.Data[row*n : (row+1)*n]
 		weightScale := q.Scale[row]
 		b := 0
-		for ; b+3 < batch; b += 4 {
-			x0 := x[b*n : (b+1)*n]
-			x1 := x[(b+1)*n : (b+2)*n]
-			x2 := x[(b+2)*n : (b+3)*n]
-			x3 := x[(b+3)*n : (b+4)*n]
-			v0, v1, v2, v3 := dotInt8Batch4(x0, x1, x2, x3, weights)
-			out[b*d+row] = float32(v0) * xScale[b] * weightScale
-			out[(b+1)*d+row] = float32(v1) * xScale[b+1] * weightScale
-			out[(b+2)*d+row] = float32(v2) * xScale[b+2] * weightScale
-			out[(b+3)*d+row] = float32(v3) * xScale[b+3] * weightScale
+		if useDotInt8Batch4(n) {
+			for ; b+3 < batch; b += 4 {
+				x0 := x[b*n : (b+1)*n]
+				x1 := x[(b+1)*n : (b+2)*n]
+				x2 := x[(b+2)*n : (b+3)*n]
+				x3 := x[(b+3)*n : (b+4)*n]
+				v0, v1, v2, v3 := dotInt8Batch4(x0, x1, x2, x3, weights)
+				out[b*d+row] = float32(v0) * xScale[b] * weightScale
+				out[(b+1)*d+row] = float32(v1) * xScale[b+1] * weightScale
+				out[(b+2)*d+row] = float32(v2) * xScale[b+2] * weightScale
+				out[(b+3)*d+row] = float32(v3) * xScale[b+3] * weightScale
+			}
 		}
 		for ; b < batch; b++ {
 			out[b*d+row] = float32(dotInt8(x[b*n:(b+1)*n], weights)) * xScale[b] * weightScale

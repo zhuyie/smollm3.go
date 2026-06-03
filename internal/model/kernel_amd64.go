@@ -74,6 +74,11 @@ func dotInt8Batch4(x0 []int8, x1 []int8, x2 []int8, x3 []int8, w []int8) (int32,
 	return dotInt8Batch4Scalar(x0[:n], x1[:n], x2[:n], x3[:n], w[:n])
 }
 
+func useDotInt8Batch4(n int) bool {
+	vecN := n &^ 31
+	return useAVX2 && vecN >= simdMinN
+}
+
 func matmulF32(out []float32, x []float32, w []float32, n int, d int) {
 	if n >= simdMinN {
 		out = out[:d]
