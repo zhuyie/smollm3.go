@@ -212,6 +212,37 @@ func TestDotInt8(t *testing.T) {
 	}
 }
 
+func TestDotInt8Batch4(t *testing.T) {
+	for _, n := range []int{64, 65} {
+		x0 := make([]int8, n)
+		x1 := make([]int8, n)
+		x2 := make([]int8, n)
+		x3 := make([]int8, n)
+		w := make([]int8, n)
+		for i := range w {
+			x0[i] = int8(i%17 - 8)
+			x1[i] = int8(7 - i%13)
+			x2[i] = int8(i%11 - 5)
+			x3[i] = int8(4 - i%19)
+			w[i] = int8(i%23 - 11)
+		}
+
+		got0, got1, got2, got3 := dotInt8Batch4(x0, x1, x2, x3, w)
+		want := []int32{
+			dotInt8Scalar(x0, w),
+			dotInt8Scalar(x1, w),
+			dotInt8Scalar(x2, w),
+			dotInt8Scalar(x3, w),
+		}
+		got := []int32{got0, got1, got2, got3}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("n=%d got[%d] = %d, want %d", n, i, got[i], want[i])
+			}
+		}
+	}
+}
+
 func TestMatmulInt8MatchesFloatMatmul(t *testing.T) {
 	n := 64
 	d := 8

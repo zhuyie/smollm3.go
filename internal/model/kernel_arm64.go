@@ -8,6 +8,7 @@ const simdMinN = 64
 func dotF32ARM64(a []float32, b []float32) float32
 func dotF32Batch4ARM64(x0 []float32, x1 []float32, x2 []float32, x3 []float32, w []float32) (float32, float32, float32, float32)
 func dotInt8ARM64(x []int8, w []int8) int32
+func dotInt8Batch4ARM64(x0 []int8, x1 []int8, x2 []int8, x3 []int8, w []int8) (int32, int32, int32, int32)
 func addScaledF32ARM64(dst []float32, src []float32, scale float32)
 func attentionValueARM64(out []float32, att []float32, values []float32, steps int, stride int, offset int)
 
@@ -37,11 +38,24 @@ func dotInt8(x []int8, w []int8) int32 {
 
 func dotInt8Batch4(x0 []int8, x1 []int8, x2 []int8, x3 []int8, w []int8) (int32, int32, int32, int32) {
 	n := min(len(x0), len(x1), len(x2), len(x3), len(w))
-	return dotInt8(x0[:n], w[:n]), dotInt8(x1[:n], w[:n]), dotInt8(x2[:n], w[:n]), dotInt8(x3[:n], w[:n])
+	vecN := n &^ 15
+	if vecN >= simdMinN {
+		v0, v1, v2, v3 := dotInt8Batch4ARM64(x0[:vecN], x1[:vecN], x2[:vecN], x3[:vecN], w[:vecN])
+		if vecN < n {
+			r0, r1, r2, r3 := dotInt8Batch4Scalar(x0[vecN:n], x1[vecN:n], x2[vecN:n], x3[vecN:n], w[vecN:n])
+			v0 += r0
+			v1 += r1
+			v2 += r2
+			v3 += r3
+		}
+		return v0, v1, v2, v3
+	}
+	return dotInt8Batch4Scalar(x0[:n], x1[:n], x2[:n], x3[:n], w[:n])
 }
 
-func useDotInt8Batch4(int) bool {
-	return false
+func canUseDotInt8Batch4(n int) bool {
+	vecN := n &^ 15
+	return vecN >= simdMinN
 }
 
 func matmulF32(out []float32, x []float32, w []float32, n int, d int) {

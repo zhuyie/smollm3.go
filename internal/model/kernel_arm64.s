@@ -185,6 +185,53 @@ dot_i8_reduce:
 	MOVW	R0, ret+48(FP)
 	RET
 
+// func dotInt8Batch4ARM64(x0, x1, x2, x3, w []int8) (int32, int32, int32, int32)
+// Computes four int8 dot products against the same weight row. The Go wrapper
+// only passes vector lengths that are multiples of 16.
+TEXT ·dotInt8Batch4ARM64(SB), NOSPLIT, $0-136
+	MOVD	x0_base+0(FP), R0
+	MOVD	x0_len+8(FP), R2
+	MOVD	x1_base+24(FP), R1
+	MOVD	x2_base+48(FP), R4
+	MOVD	x3_base+72(FP), R5
+	MOVD	w_base+96(FP), R6
+
+	VEOR	V0.B16, V0.B16, V0.B16
+	VEOR	V1.B16, V1.B16, V1.B16
+	VEOR	V2.B16, V2.B16, V2.B16
+	VEOR	V3.B16, V3.B16, V3.B16
+
+	LSR	$4, R2, R3
+	CBZ	R3, dot_i8_batch4_reduce
+
+dot_i8_batch4_loop16:
+	VLD1.P	16(R6), [V4.B16]
+	VLD1.P	16(R0), [V5.B16]
+	VLD1.P	16(R1), [V6.B16]
+	VLD1.P	16(R4), [V7.B16]
+	VLD1.P	16(R5), [V8.B16]
+	WORD	$0x4E8494A0 // SDOT V0.4S, V5.16B, V4.16B
+	WORD	$0x4E8494C1 // SDOT V1.4S, V6.16B, V4.16B
+	WORD	$0x4E8494E2 // SDOT V2.4S, V7.16B, V4.16B
+	WORD	$0x4E849503 // SDOT V3.4S, V8.16B, V4.16B
+	SUB	$1, R3
+	CBNZ	R3, dot_i8_batch4_loop16
+
+dot_i8_batch4_reduce:
+	WORD	$0x4EB1B800 // ADDV S0, V0.4S
+	WORD	$0x4EB1B821 // ADDV S1, V1.4S
+	WORD	$0x4EB1B842 // ADDV S2, V2.4S
+	WORD	$0x4EB1B863 // ADDV S3, V3.4S
+	VMOV	V0.S[0], R0
+	VMOV	V1.S[0], R1
+	VMOV	V2.S[0], R2
+	VMOV	V3.S[0], R3
+	MOVW	R0, ret+120(FP)
+	MOVW	R1, ret1+124(FP)
+	MOVW	R2, ret2+128(FP)
+	MOVW	R3, ret3+132(FP)
+	RET
+
 // func addScaledF32ARM64(dst, src []float32, scale float32)
 TEXT ·addScaledF32ARM64(SB), NOSPLIT, $0-52
 	MOVD	dst_base+0(FP), R0

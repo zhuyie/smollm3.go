@@ -22,7 +22,7 @@ func dotInt8Batch4(x0 []int8, x1 []int8, x2 []int8, x3 []int8, w []int8) (int32,
 	return dotInt8Batch4Scalar(x0[:n], x1[:n], x2[:n], x3[:n], w[:n])
 }
 
-func useDotInt8Batch4(int) bool {
+func canUseDotInt8Batch4(int) bool {
 	return false
 }
 

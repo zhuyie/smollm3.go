@@ -127,7 +127,7 @@ func matmulBatchInt8Rows(out []float32, x []int8, xScale []float32, q *Quantized
 		weights := q.Data[row*n : (row+1)*n]
 		weightScale := q.Scale[row]
 		b := 0
-		if useDotInt8Batch4(n) {
+		if canUseDotInt8Batch4(n) {
 			for ; b+3 < batch; b += 4 {
 				x0 := x[b*n : (b+1)*n]
 				x1 := x[(b+1)*n : (b+2)*n]
