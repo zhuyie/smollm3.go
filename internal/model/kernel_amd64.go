@@ -103,7 +103,11 @@ func addScaledF32(dst []float32, src []float32, scale float32) {
 }
 
 func attentionValue(out []float32, att []float32, values []float32, steps int, stride int, offset int) {
-	attentionValueScalar(out, att, values, steps, stride, offset)
+	clear(out)
+	for ts := 0; ts < steps; ts++ {
+		v := values[ts*stride+offset : ts*stride+offset+len(out)]
+		addScaledF32(out, v, att[ts])
+	}
 }
 
 func attentionScores(out []float32, q []float32, keys []float32, steps int, stride int, offset int, scale float32) {
