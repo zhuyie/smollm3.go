@@ -45,6 +45,18 @@ func dotInt8Scalar(x []int8, w []int8) int32 {
 	return val
 }
 
+func dotInt8Batch4Scalar(x0 []int8, x1 []int8, x2 []int8, x3 []int8, w []int8) (int32, int32, int32, int32) {
+	var v0, v1, v2, v3 int32
+	for i, weight := range w {
+		wi := int32(weight)
+		v0 += int32(x0[i]) * wi
+		v1 += int32(x1[i]) * wi
+		v2 += int32(x2[i]) * wi
+		v3 += int32(x3[i]) * wi
+	}
+	return v0, v1, v2, v3
+}
+
 func matmulScalar(out []float32, x []float32, w []float32, n int, d int) {
 	out = out[:d]
 	x = x[:n]

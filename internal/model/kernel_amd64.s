@@ -181,6 +181,98 @@ dot_int8_reduce:
 	VZEROUPPER
 	RET
 
+// func dotInt8Batch4AMD64(x0, x1, x2, x3, w []int8) (int32, int32, int32, int32)
+// The Go wrapper calls this for lengths that are multiples of 32.
+TEXT ·dotInt8Batch4AMD64(SB), NOSPLIT, $0-136
+	MOVQ x0_base+0(FP), AX
+	MOVQ x0_len+8(FP), CX
+	MOVQ x1_base+24(FP), BX
+	MOVQ x2_base+48(FP), DX
+	MOVQ x3_base+72(FP), SI
+	MOVQ w_base+96(FP), DI
+
+	VPXOR Y0, Y0, Y0
+	VPXOR Y1, Y1, Y1
+	VPXOR Y2, Y2, Y2
+	VPXOR Y3, Y3, Y3
+	SHRQ $5, CX
+	JZ dot_int8_batch4_reduce
+
+dot_int8_batch4_loop32:
+	VPMOVSXBW (DI), Y4
+	VPMOVSXBW 16(DI), Y5
+
+	VPMOVSXBW (AX), Y6
+	VPMOVSXBW 16(AX), Y7
+	VPMADDWD Y4, Y6, Y6
+	VPMADDWD Y5, Y7, Y7
+	VPADDD Y6, Y0, Y0
+	VPADDD Y7, Y0, Y0
+
+	VPMOVSXBW (BX), Y6
+	VPMOVSXBW 16(BX), Y7
+	VPMADDWD Y4, Y6, Y6
+	VPMADDWD Y5, Y7, Y7
+	VPADDD Y6, Y1, Y1
+	VPADDD Y7, Y1, Y1
+
+	VPMOVSXBW (DX), Y6
+	VPMOVSXBW 16(DX), Y7
+	VPMADDWD Y4, Y6, Y6
+	VPMADDWD Y5, Y7, Y7
+	VPADDD Y6, Y2, Y2
+	VPADDD Y7, Y2, Y2
+
+	VPMOVSXBW (SI), Y6
+	VPMOVSXBW 16(SI), Y7
+	VPMADDWD Y4, Y6, Y6
+	VPMADDWD Y5, Y7, Y7
+	VPADDD Y6, Y3, Y3
+	VPADDD Y7, Y3, Y3
+
+	ADDQ $32, AX
+	ADDQ $32, BX
+	ADDQ $32, DX
+	ADDQ $32, SI
+	ADDQ $32, DI
+	DECQ CX
+	JNZ dot_int8_batch4_loop32
+
+dot_int8_batch4_reduce:
+	VEXTRACTI128 $1, Y0, X8
+	VPADDD X8, X0, X0
+	VPSHUFD $0x4e, X0, X8
+	VPADDD X8, X0, X0
+	VPSHUFD $0xb1, X0, X8
+	VPADDD X8, X0, X0
+	MOVL X0, ret+120(FP)
+
+	VEXTRACTI128 $1, Y1, X8
+	VPADDD X8, X1, X1
+	VPSHUFD $0x4e, X1, X8
+	VPADDD X8, X1, X1
+	VPSHUFD $0xb1, X1, X8
+	VPADDD X8, X1, X1
+	MOVL X1, ret1+124(FP)
+
+	VEXTRACTI128 $1, Y2, X8
+	VPADDD X8, X2, X2
+	VPSHUFD $0x4e, X2, X8
+	VPADDD X8, X2, X2
+	VPSHUFD $0xb1, X2, X8
+	VPADDD X8, X2, X2
+	MOVL X2, ret2+128(FP)
+
+	VEXTRACTI128 $1, Y3, X8
+	VPADDD X8, X3, X3
+	VPSHUFD $0x4e, X3, X8
+	VPADDD X8, X3, X3
+	VPSHUFD $0xb1, X3, X8
+	VPADDD X8, X3, X3
+	MOVL X3, ret3+132(FP)
+	VZEROUPPER
+	RET
+
 // func addScaledF32AMD64(dst, src []float32, scale float32)
 // The Go wrapper calls this with a length that is a multiple of 8.
 TEXT ·addScaledF32AMD64(SB), NOSPLIT, $0-52
